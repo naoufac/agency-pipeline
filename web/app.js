@@ -281,10 +281,11 @@ function roadmap(){
     { n:'02', t:'Honest quality', s:'done', d:'A gate that refuses broken/external assets, KPIs that never lie (a stuck run reads “blocked”, not green), and retry-with-feedback so failures self-correct.' },
     { n:'03', t:'Generic + multi-page', s:'done', d:'An LLM planner that writes a bespoke task graph per brief, producing real multi-page sites with a shared navigation.' },
     { n:'04', t:'Design excellence', s:'done', d:'Tailwind compiled & inlined per page, real fonts shipped inline — modern 2024 output, not 1998 HTML.' },
-    { n:'05', t:'Real media', s:'progress', d:'Existing photography & video (Pexels) searched per section, downloaded into the site and served locally — gate-safe, never a broken link.' },
-    { n:'06', t:'Email platform', s:'progress', d:'The EmailDelivery ESP on email.naples.agency — campaigns, automations, segments, relay-based sending.' },
-    { n:'07', t:'Editable CMS', s:'next', d:'Pages & blocks in Postgres; edit content and re-publish a single page through the same verified build path.' },
-    { n:'08', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
+    { n:'05', t:'Built to last', s:'done', d:'Every piece supervised by systemd (Restart=always): Relay, the Cloudflare tunnel and Postgres survive any crash or reboot — proven by kill-tests. Plus a full doc set and a live Review page so the work stays visible, not buried in files.' },
+    { n:'06', t:'Real media', s:'progress', d:'Existing photography & video (Pexels) searched per section, downloaded into the site and served locally — gate-safe, never a broken link.' },
+    { n:'07', t:'Email platform', s:'progress', d:'The EmailDelivery ESP on email.naples.agency — campaigns, automations, segments, relay-based sending.' },
+    { n:'08', t:'Editable CMS', s:'next', d:'Pages & blocks in Postgres; edit content and re-publish a single page through the same verified build path.' },
+    { n:'09', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -320,6 +321,61 @@ function about(){
   </div></div>`;
 }
 
+/* ---------------- system review & verdicts ---------------- */
+function review(){
+  const SEV = { critical:'Critical', high:'High', medium:'Medium', low:'Low', cross:'Cross-tenant' };
+  const F = [
+    { g:'done', sev:'critical', t:'Unsupervised processes', v:'cloudflared and the Relay server ran as hand-started processes — a crash or reboot took every naples.agency hostname offline until someone restarted them by hand.', fix:'Both now run under systemd with Restart=always (enabled). Crash-tested: SIGKILL → respawn in 2–3s → board back to 200.' },
+    { g:'done', sev:'high', t:'Secret lived only in memory', v:'MINIMAX_API_KEY and DATABASE_URL existed only inside the running process — there was no .env on disk, so any restart would boot Relay with no key.', fix:'Captured to a gitignored .env (mode 600) and loaded via the systemd EnvironmentFile.' },
+    { g:'done', sev:'high', t:'Fresh clone shipped un-styled', v:'The 120 MB Tailwind binary is gitignored; on a clean deploy the excellence step silently no-op’d and shipped 1998-look HTML that still passed the gate.', fix:'setup.sh is now idempotent + validates the binary; npm postinstall and the service’s ExecStartPre vendor it automatically.' },
+    { g:'done', sev:'high', t:'Silent failures (shipping a lie)', v:'On any excellence error the build silently returned raw HTML; an unset key silently switched to stub sites. Both were invisible — the opposite of “never lie”.', fix:'excellence.ts now logs loudly on missing binary / empty CSS / compile failure; server.ts prints a boot banner when the key is unset (stub mode).' },
+    { g:'done', sev:'medium', t:'Postgres didn’t survive reboot', v:'The ap-pg container had restart policy “no”, so a host reboot would lose the database.', fix:'Set to unless-stopped (verified).' },
+    { g:'done', sev:'medium', t:'Nothing was documented', v:'No runbook, no architecture doc, no agent guide — the whole system lived only in chat history.', fix:'Shipped README, ARCHITECTURE, an OPERATIONS runbook, an AGENTS guide, a HARDENING backlog and deploy/ unit files — plus this page.' },
+
+    { g:'defer', sev:'high', t:'Destructive schema bootstrap', v:'db/schema.sql opens with unconditional DROP TABLE … CASCADE and the server never applies it on boot — a fresh DB 500s, and run.ts/demo.ts drop already-shipped work.', fix:'Move to CREATE … IF NOT EXISTS, apply at boot before listen(), gate the reset behind RESET=1, add a numbered migrations/ dir.' },
+    { g:'defer', sev:'high', t:'Stub mode still serves', v:'The new boot banner warns, but with no key Relay still serves stub sites that pass every gate.', fix:'Hard-exit in production, or badge the project as “stub” in the UI + KPI so it can never be mistaken for real work.' },
+    { g:'defer', sev:'medium', t:'Scheduler pool exhaustion', v:'A global claim() + one runLoop per project, all tagged runnerId=runner-1; three concurrent projects can exhaust the Postgres pool (max 8).', fix:'Scope claim/reconcile by project, give each loop a unique runnerId, run one scheduler or size the pool to the loop count.' },
+    { g:'defer', sev:'medium', t:'Lease / reclaim race', v:'The 240 s task lease can be shorter than a slow render + Tailwind compile + LLM call, so a live task gets re-claimed → two writers hit the same artifact.', fix:'Make terminal writes conditional on claimed_by, heartbeat-extend the lease, only resurrect provably-dead owners.' },
+    { g:'defer', sev:'medium', t:'No retry backoff', v:'Each task burns three full attempts with no backoff — a MiniMax 429 or outage gets hammered instead of paused.', fix:'Exponential backoff, fail-fast on identical repeated failures, a per-project circuit breaker.' },
+    { g:'defer', sev:'low', t:'Shipped sites are ephemeral', v:'sites/ is gitignored and QA can overwrite the preview thumbnail; output is lost on a host migration.', fix:'Persist final verified HTML in Postgres / object storage; write QA’s screenshot to a distinct path.' },
+    { g:'defer', sev:'low', t:'Frontend polish', v:'Polling cadence, vis-network loaded from a CDN without SRI, missing API-down states, a few accessibility gaps.', fix:'UX hardening — real but not stack-survival; scheduled separately.' },
+    { g:'defer', sev:'cross', t:'Dormant neighbour upstreams', v:'dash / gab44 / fleet* ride the same tunnel but their apps are down (502) and unsupervised — they belong to other projects on this box.', fix:'Each needs its own unit; coordinate with the owners before enabling.' },
+  ];
+  const cardOf = f => `<div class="card rv-card ${f.g}">
+      <div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <h3 class="rv-title">${esc(f.t)}</h3><span class="sev sev-${f.sev}">${SEV[f.sev]}</span></div>
+      <p class="muted" style="margin-top:8px">${esc(f.v)}</p>
+      <p class="rv-fix ${f.g}"><span>${f.g==='done'?'✓ Fixed':'→ Plan'}</span>${esc(f.fix)}</p>
+    </div>`;
+  const doneF = F.filter(f=>f.g==='done'), deferF = F.filter(f=>f.g==='defer');
+  app.innerHTML = `<div class="container section">
+    <span class="eyebrow">● system review · 2026-06-27</span>
+    <h1 style="margin-top:14px">Review &amp; verdicts</h1>
+    <p class="lead" style="margin-top:14px">A full durability audit of Relay — infrastructure and code. The verdict lives here, in the product, not as a file rotting on the server. <b style="color:var(--text)">${doneF.length} applied &amp; verified · ${deferF.length} tracked.</b></p>
+
+    <div class="rv-banner">
+      <div class="rv-stat"><span class="rv-num">100%</span><span class="rv-cap">survives crash + reboot</span></div>
+      <div class="rv-stat"><span class="rv-num">2–3s</span><span class="rv-cap">auto-respawn · kill-tested</span></div>
+      <div class="rv-stat"><span class="rv-num">3</span><span class="rv-cap">services under systemd</span></div>
+      <p class="muted" style="flex:1;min-width:220px;margin:0">Relay, the Cloudflare tunnel and Postgres are all supervised and were proven by SIGKILL → automatic recovery. No public hostname depends on a hand-started process anymore.</p>
+    </div>
+
+    <div class="rv-decision">
+      <h3>Decision · supervise the tunnel, don’t rip out Cloudflare</h3>
+      <p class="muted">The flakiness was never Cloudflare’s rules — it was cloudflared running unsupervised. Ripping it out is the riskier path here: both public 80/443 are owned by another tenant on this box, there’s no Cloudflare API token to change DNS, and grey-clouding would expose the origin IP. So we supervised the existing named tunnel (now Restart=always) and kept Tailscale Funnel as a redundant path. Full rationale in OPERATIONS.md §8.</p>
+    </div>
+
+    <h2 class="rv-h">Applied &amp; verified <span class="rv-count done">${doneF.length}</span></h2>
+    <div class="rv-list">${doneF.map(cardOf).join('')}</div>
+
+    <h2 class="rv-h" style="margin-top:40px">Tracked backlog <span class="rv-count defer">${deferF.length}</span></h2>
+    <p class="muted" style="margin:6px 0 0">Real findings, ranked. Not yet applied — they need a schema change, load-testing, or another team’s sign-off. Recorded so none of it is lost.</p>
+    <div class="rv-list">${deferF.map(cardOf).join('')}</div>
+
+    <p style="margin-top:42px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="#/roadmap">See the roadmap →</a><a class="btn btn-ghost" href="#/">Build a site</a></p>
+  </div>`;
+}
+
 /* ---------------- router ---------------- */
 function router(){
   clearPoll(); closeDrawer(false); navLinks?.classList.remove('open');
@@ -339,6 +395,7 @@ function router(){
   if (!seg.length) home();
   else if (seg[0] === 'new') { navPath = '/new'; newSite(); }
   else if (seg[0] === 'roadmap') { navPath = '/roadmap'; roadmap(); }
+  else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
   else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();

@@ -259,3 +259,31 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .rm-tag.prog{background:rgba(124,122,255,.16);color:var(--accent-2)}
 .rm-tag.next{background:var(--surface-2);color:var(--muted)}
 @media(max-width:720px){ .tl-item{padding-left:56px} .timeline::before{left:19px} .tl-node{width:40px;height:40px;font-size:12px} }
+
+/* ============ review & verdicts ============ */
+.rv-banner{display:flex;flex-wrap:wrap;align-items:center;gap:24px;margin:28px 0 8px;padding:22px 24px;
+  background:linear-gradient(120deg,rgba(54,179,126,.10),rgba(124,122,255,.07));border:1px solid var(--line);border-radius:var(--r3)}
+.rv-stat{display:flex;flex-direction:column;gap:3px}
+.rv-num{font-family:var(--font-display);font-weight:700;font-size:28px;color:var(--st-done);line-height:1;font-variant-numeric:tabular-nums}
+.rv-cap{font-size:12px;color:var(--muted)}
+.rv-decision{margin-top:22px;padding:18px 22px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r2);background:var(--surface)}
+.rv-decision h3{font-size:16px;margin-bottom:8px}
+.rv-h{margin-top:44px;display:flex;align-items:center;gap:12px}
+.rv-count{font-family:var(--font-body);font-size:13px;font-weight:600;padding:2px 11px;border-radius:var(--rpill)}
+.rv-count.done{background:rgba(54,179,126,.14);color:var(--st-done)}
+.rv-count.defer{background:var(--surface-2);color:var(--muted)}
+.rv-list{display:grid;gap:14px;margin-top:18px}
+@media(min-width:760px){ .rv-list{grid-template-columns:repeat(2,1fr)} }
+.rv-card{padding:18px 20px}
+.rv-card.done{border-left:3px solid var(--st-done)}
+.rv-card.defer{border-left:3px solid var(--st-ready)}
+.rv-title{font-size:16px;line-height:1.25}
+.rv-fix{margin-top:12px;font-size:13.5px;color:var(--text);border-top:1px dashed var(--line);padding-top:11px}
+.rv-fix span{font-weight:700;margin-right:7px}
+.rv-fix.done span{color:var(--st-done)} .rv-fix.defer span{color:var(--st-ready)}
+.sev{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:3px 9px;border-radius:var(--rpill);white-space:nowrap;align-self:flex-start}
+.sev-critical{background:rgba(240,80,110,.16);color:var(--st-failed)}
+.sev-high{background:rgba(224,132,62,.18);color:#E0843E}
+.sev-medium{background:rgba(90,141,238,.16);color:var(--st-running)}
+.sev-low{background:var(--surface-2);color:var(--muted)}
+.sev-cross{background:rgba(160,108,213,.16);color:var(--st-verifying)}
