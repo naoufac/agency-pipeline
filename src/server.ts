@@ -12,6 +12,21 @@ import { SITES } from './verify.ts';
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
 if (!process.env.MINIMAX_API_KEY) console.error('⚠️  MINIMAX_API_KEY not set — Relay will ship STUB sites, not real work. Set it in .env before serving production traffic.');
+
+// crash handlers: log + exit so systemd (Restart=always) brings us back clean instead of half-dead
+process.on('unhandledRejection', (e: any) => console.error('unhandledRejection', e?.message ?? e));
+process.on('uncaughtException', (e: any) => { console.error('uncaughtException', e?.message ?? e); process.exit(1); });
+
+// /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
+// (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
+const RUN_HITS = new Map<string, number[]>();
+const RUN_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, MAX_ACTIVE_PROJECTS = 6;
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const arr = (RUN_HITS.get(ip) || []).filter((t) => now - t < RUN_WINDOW_MS);
+  if (arr.length >= RUN_MAX_PER_IP) { RUN_HITS.set(ip, arr); return true; }
+  arr.push(now); RUN_HITS.set(ip, arr); return false;
+}
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {
@@ -93,6 +108,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === '/api/run' && req.method === 'POST') {
+      const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+      if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
+      const active = (await pool.query("select count(distinct project_id)::int n from tasks where status in ('ready','running','verifying')")).rows[0].n;
+      if (active >= MAX_ACTIVE_PROJECTS) return send(res, 429, 'application/json', JSON.stringify({ error: 'Relay is at capacity right now — a few sites are still building. Try again in a moment.' }));
       let raw = ''; for await (const c of req) raw += c;
       let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
       if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
