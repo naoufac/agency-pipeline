@@ -86,9 +86,16 @@ export async function listTables(pool: pg.Pool, projectId: string): Promise<stri
   return r.rows.map((x: any) => x.table_name);
 }
 
-async function columns(pool: pg.Pool, schema: string, table: string): Promise<string[]> {
-  const r = await pool.query('select column_name from information_schema.columns where table_schema=$1 and table_name=$2', [schema, table]);
-  return r.rows.map((x: any) => x.column_name);
+async function typedColumns(pool: pg.Pool, schema: string, table: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
+  const r = await pool.query('select column_name, data_type, is_nullable from information_schema.columns where table_schema=$1 and table_name=$2 order by ordinal_position', [schema, table]);
+  return r.rows.map((x: any) => ({ name: x.column_name, type: x.data_type, nullable: x.is_nullable === 'YES' }));
+}
+// coerce a posted string to the column's real type (so a numeric/boolean column stores correctly)
+function coerce(v: any, type: string): any {
+  if (v === '' || v === null || v === undefined) return null;
+  if (/bool/.test(type)) return v === true || /^(true|on|1|yes)$/i.test(String(v));
+  if (/int|numeric|real|double|decimal/.test(type)) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+  return String(v);
 }
 
 // Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
@@ -102,18 +109,24 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
   return r.rows.map((row: any) => { const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k]; return o; });
 }
 
-// Insert one row into a REAL project table — only into columns that actually exist, fully parameterized.
+// Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.
 export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>): Promise<boolean> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return false;
-  const tables = await listTables(pool, projectId);
-  if (!tables.includes(table)) return false;
-  const cols = (await columns(pool, schema, table)).filter(col => col in (data || {}) && IDENT.test(col) && col !== 'id' && col !== 'created_at');
-  if (!cols.length) return false;
-  const vals = cols.map((_, i) => '$' + (i + 1));
-  await pool.query(`insert into "${schema}"."${table}" (${cols.map(c => `"${c}"`).join(',')}) values (${vals.join(',')})`,
-    cols.map(col => data[col]));
+  if (!(await listTables(pool, projectId)).includes(table)) return false;
+  const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name));
+  if (!use.length) return false;
+  const vals = use.map((_, i) => '$' + (i + 1));
+  await pool.query(`insert into "${schema}"."${table}" (${use.map(c => `"${c.name}"`).join(',')}) values (${vals.join(',')})`,
+    use.map(c => coerce(data[c.name], c.type)));
   return true;
+}
+
+// Columns of a table suitable for an "add a record" form: scalar, user-fillable (no id/created_at/FK/secrets).
+export async function formColumns(pool: pg.Pool, projectId: string, table: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !(await listTables(pool, projectId)).includes(table)) return [];
+  return (await typedColumns(pool, schema, table)).filter(c => !['id', 'created_at'].includes(c.name) && !/_id$/.test(c.name) && !SENSITIVE.test(c.name));
 }
 
 // INTROSPECTION — the system knows the database: every table's columns/types, real relations, row counts.

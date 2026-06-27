@@ -4,6 +4,7 @@ import { FONT_FACES } from './fonts.ts';
 
 export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
 const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
+const humanize = (s: string) => String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // Design-system CSS. Responsive, CSS-only hamburger (no JS), fixed spacing/type scale. Inlined per page.
 export const DS_CSS = FONT_FACES + `
@@ -71,6 +72,7 @@ p{margin:0 0 1rem}
 .rform input,.rform textarea{font:inherit;padding:.72rem .9rem;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);width:100%}
 .rform input:focus,.rform textarea:focus{outline:0;border-color:var(--primary)}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
+.rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
 /* theme hero alignment — body carries .t-<theme>, set deterministically by the renderer */
 .t-bold .hero-inner{margin-left:auto;margin-right:auto;text-align:center}
@@ -94,7 +96,7 @@ export function footer(brand: string, pages: any[]) {
 }
 
 // section components — each takes a content object, returns perfect HTML
-export const SECTIONS: Record<string, (s: any, o?: { cta?: string }) => string> = {
+export const SECTIONS: Record<string, (s: any, o?: { cta?: string; forms?: Record<string, any[]> }) => string> = {
   hero: (s, o) => `<header class="hero ${s.image ? 'on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
     <div class="container"><div class="hero-inner">
       ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h1>${esc(s.headline)}</h1>
@@ -134,17 +136,32 @@ export const SECTIONS: Record<string, (s: any, o?: { cta?: string }) => string> 
       <div class="grid grid-3 feed" data-feed="${form}" style="margin-top:2.4rem"><p class="muted feed-empty">${empty}</p></div>
     </div></section>`;
   },
-  // FULL-STACK: a real form that posts to /api/site/<id>/submit -> Postgres
-  form: (s) => {
-    const fields = (Array.isArray(s.fields) && s.fields.length ? s.fields : [
-      { name: 'name', label: 'Full name' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'message', label: 'Message', type: 'textarea' }]);
+  // FULL-STACK write path. Default → a contact form into `site_submissions`. With `table` (and the
+  // renderer-provided schema for it) → a typed "add a record" form whose fields are GENERATED from the
+  // real table's columns and which writes a REAL row to /api/site/<id>/data/<table> (then the matching
+  // collection refreshes). The model picks the table + copy; the system configures the fields.
+  form: (s, o) => {
+    const tcols = (s.table && o?.forms && Array.isArray(o.forms[s.table])) ? o.forms[s.table] : null;
+    const dataTable = tcols ? s.table : '';
+    const inputType = (c: any) => /bool/.test(c.type) ? 'checkbox'
+      : /int|numeric|real|double|decimal/.test(c.type) ? 'number'
+      : /date|time/.test(c.type) ? 'date'
+      : (/desc|message|note|bio|content|about|detail|summary|story/.test(c.name) ? 'textarea' : (/email/.test(c.name) ? 'email' : 'text'));
+    const fields = tcols
+      ? tcols.map((c: any) => ({ name: c.name, label: humanize(c.name), type: inputType(c), required: !c.nullable }))
+      : (Array.isArray(s.fields) && s.fields.length ? s.fields : [
+          { name: 'name', label: 'Full name', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'message', label: 'Message', type: 'textarea', required: true }]);
+    const field = (f: any) => {
+      const req = f.required === false ? '' : ' required';
+      if (f.type === 'checkbox') return `<label class="rcheck"><input type="checkbox" name="${esc(f.name)}"> ${esc(f.label)}</label>`;
+      if (f.type === 'textarea') return `<label>${esc(f.label)}<textarea name="${esc(f.name)}"${req}></textarea></label>`;
+      return `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}"${req}></label>`;
+    };
     return `<section class="section" id="contact-form"><div class="container"><div class="formwrap">
       ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-      <form class="rform" data-form="${esc(s.form || 'contact')}" onsubmit="return relaySubmit(event)">
-        ${fields.map((f: any) => f.type === 'textarea'
-          ? `<label>${esc(f.label)}<textarea name="${esc(f.name)}" required></textarea></label>`
-          : `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}" required></label>`).join('')}
-        <button class="btn" type="submit">${esc(s.cta || 'Send')}</button>
+      <form class="rform" data-form="${esc(s.form || dataTable || 'contact')}"${dataTable ? ` data-table="${esc(dataTable)}"` : ''} onsubmit="return relaySubmit(event)">
+        ${fields.map(field).join('')}
+        <button class="btn" type="submit">${esc(s.cta || (dataTable ? 'Add' : 'Send'))}</button>
         <p class="rform-msg" hidden></p>
       </form>
     </div></div></section>`;

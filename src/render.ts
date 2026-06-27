@@ -11,7 +11,7 @@ const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16
 function mix(a: string, b: string, t: number) { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => hex(x[i] * (1 - t) + y[i] * t)).join(''); }
 const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg) ? '#ffffff' : '#0b1220';   // readable text for a bg
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; forms?: Record<string, any[]> }): string {
   const t = (spec && spec.brand && spec.brand.tokens) || {};
   const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
   const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
@@ -37,7 +37,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const actionPage = pgs.find((p: any) => actionRe.test(`${p.slug} ${p.title}`));
   const ctaHref = actionPage ? `${actionPage.slug}.html`
     : (pgs.length > 1 ? `${pgs[pgs.length - 1].slug}.html` : '#contact-form');
-  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { cta: ctaHref })).join('\n');
+  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { cta: ctaHref, forms: ctx.forms })).join('\n');
   return `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
@@ -49,13 +49,13 @@ ${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta, ctaHr
 ${sections}
 </main>
 ${footer(brand, ctx.pages)}
-<script>window.RELAY_PID=${JSON.stringify(ctx.projectId || '')};function relaySubmit(e){e.preventDefault();var f=e.target,d={};new FormData(f).forEach(function(v,k){d[k]=v});var m=f.querySelector('.rform-msg'),b=f.querySelector('button');if(b)b.disabled=true;fetch('/api/site/'+window.RELAY_PID+'/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({form:f.dataset.form,data:d})}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(){f.reset();if(m){m.hidden=false;m.textContent='Thanks — we got your message.'}}).catch(function(){if(m){m.hidden=false;m.textContent='Sorry, something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false}
+<script>window.RELAY_PID=${JSON.stringify(ctx.projectId || '')};function relaySubmit(e){e.preventDefault();var f=e.target,d={};new FormData(f).forEach(function(v,k){d[k]=v});var m=f.querySelector('.rform-msg'),b=f.querySelector('button');if(b)b.disabled=true;var tbl=f.getAttribute('data-table');var url=tbl?('/api/site/'+window.RELAY_PID+'/data/'+encodeURIComponent(tbl)):('/api/site/'+window.RELAY_PID+'/submit');fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({form:f.dataset.form,data:d})}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(res){if(res&&res.ok===false)throw 0;f.reset();if(m){m.hidden=false;m.textContent=tbl?'Added ✓':'Thanks — we got your message.'}if(tbl&&window.__relayLoad)window.__relayLoad();}).catch(function(){if(m){m.hidden=false;m.textContent='Sorry, something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false}
 /* live read paths: .feed reads form submissions, .collection reads a real DB table. Both no-op under
    file:// (the gate) and populate over HTTP. textContent ONLY — server data is never injected as HTML. */
 function __rcards(el,items){if(!items||!items.length)return;el.innerHTML='';items.slice(0,12).forEach(function(o){o=o||{};var keys=Object.keys(o).filter(function(k){return['id','created_at','password_hash','password'].indexOf(k)<0});var tk=['name','title','business','listing','label'].filter(function(k){return o[k]})[0]||keys[0];var card=document.createElement('div');card.className='card';if(tk){var h=document.createElement('h3');h.textContent=String(o[tk]);card.appendChild(h);}keys.filter(function(k){return k!==tk}).slice(0,4).forEach(function(k){var p=document.createElement('p');p.textContent=String(o[k]);card.appendChild(p);});el.appendChild(card);});}
-(function(){var pid=window.RELAY_PID;if(!pid)return;
+window.__relayLoad=function(){var pid=window.RELAY_PID;if(!pid)return;
 Array.prototype.forEach.call(document.querySelectorAll('.feed[data-feed]'),function(el){fetch('/api/submissions?id='+encodeURIComponent(pid)+'&form='+encodeURIComponent(el.getAttribute('data-feed'))).then(function(r){return r.json()}).then(function(d){__rcards(el,((d&&d.submissions)||[]).map(function(s){return s.data||{}}))}).catch(function(){})});
-Array.prototype.forEach.call(document.querySelectorAll('.collection[data-table]'),function(el){fetch('/api/site/'+encodeURIComponent(pid)+'/data/'+encodeURIComponent(el.getAttribute('data-table'))).then(function(r){return r.json()}).then(function(d){__rcards(el,(d&&d.rows)||[])}).catch(function(){})});
-})();</script>
+Array.prototype.forEach.call(document.querySelectorAll('.collection[data-table]'),function(el){fetch('/api/site/'+encodeURIComponent(pid)+'/data/'+encodeURIComponent(el.getAttribute('data-table'))).then(function(r){return r.json()}).then(function(d){__rcards(el,(d&&d.rows)||[])}).catch(function(){})});};
+window.__relayLoad();</script>
 </body></html>`;
 }

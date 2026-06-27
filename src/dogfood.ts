@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import WebSocket from 'ws';
 import pg from 'pg';
 import { ev } from './db.ts';
+import * as appdb from './appdb.ts';
 
 const CHROME = process.env.CHROME_BIN || '/usr/bin/chromium-browser';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -50,9 +51,9 @@ class CDP {
 const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.querySelector('main .container')||document.querySelector('.container');var nl=n?n.getBoundingClientRect().left:null,cl=c?c.getBoundingClientRect().left:null;return{overflow:document.documentElement.scrollWidth>window.innerWidth+2,navLeft:nl,contLeft:cl,misaligned:(nl!=null&&cl!=null)?Math.abs(nl-cl)>2:false}})()`;
 const BTNS = `Array.from(document.querySelectorAll('a.btn')).map(a=>({text:(a.textContent||'').trim().slice(0,40),href:a.getAttribute('href')}))`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
-const HASFORM = `!!document.querySelector('form.rform')`;
-// type into every field + submit for real, then read the confirmation the user would see
-const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});f.querySelectorAll('input,textarea').forEach(function(el,i){el.value=(el.type==='email')?'qa@example.com':(el.tagName==='TEXTAREA'?'Automated QA check — please ignore.':'QA Test '+i);el.dispatchEvent(new Event('input',{bubbles:true}))});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,msg:t.trim(),ok:/thank|got your|received|success/i.test(t)})},3500)})`;
+const FORMINFO = `(function(){var f=document.querySelector('form.rform');return f?{table:f.getAttribute('data-table')||''}:null})()`;
+// type into every field (by input TYPE so number/date/checkbox are valid) + submit for real, then read the confirmation
+const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea').forEach(function(el,i){var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
 
 export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; forms: number; collections: number } }> {
   const proj = await pool.query('select params from projects where id=$1', [projectId]);
@@ -76,20 +77,28 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         }
       }
     }
-    // forms: type + submit on the first page that has one, then prove the row reached Postgres
+    // forms: type into + submit the first form, then prove it landed where it should — a real entity
+    // table (an "add a record" form) OR the submissions bucket (a contact form). Then remove the QA row.
     await cdp.viewport(1280, 900, false);
     for (const pg of pages) {
       await cdp.goto(`${baseUrl}/sites/${projectId}/${pg.slug}.html`);
-      if (!(await cdp.evaluate(HASFORM))) continue;
+      const info = await cdp.evaluate(FORMINFO);
+      if (!info) continue;
       nForms++;
-      const before = Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [projectId])).rows[0].n);
+      const table = (typeof info.table === 'string' && /^[a-z_][a-z0-9_]*$/.test(info.table)) ? info.table : '';
+      const sch = table ? appdb.schemaName(projectId) : '';
+      const count = async () => table
+        ? Number((await pool.query(`select coalesce(max(id),0)::int n from "${sch}"."${table}"`)).rows[0].n)
+        : Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [projectId])).rows[0].n);
+      const before = await count();
       const r = await cdp.evaluate(SUBMIT);
-      await sleep(800);
-      const after = Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [projectId])).rows[0].n);
+      await sleep(1100);
+      const after = await count();
       if (!r?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirm', detail: `form submitted but no success confirmation (saw: "${r?.msg || ''}")`, severity: 'high' });
-      if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: 'form submission did not reach the database', severity: 'high' });
-      // tidy up: remove the QA test submission so the operator's real data stays clean
-      await pool.query("delete from site_submissions where project_id=$1 and (data->>'message'='Automated QA check — please ignore.' or data->>'name' like 'QA Test%')", [projectId]).catch(() => {});
+      if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: table ? `"add" form did not create a row in "${table}"` : 'form submission did not reach the database', severity: 'high' });
+      // tidy up the QA row so the operator's real data stays clean
+      if (table) await pool.query(`delete from "${sch}"."${table}" where id > $1`, [before]).catch(() => {});
+      else await pool.query("delete from site_submissions where project_id=$1 and (data->>'message'='Automated QA check — please ignore.' or data->>'name' like 'QA Test%')", [projectId]).catch(() => {});
       break;
     }
   } finally { cdp.close(); }

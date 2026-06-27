@@ -11,7 +11,7 @@ const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[] };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]> };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -37,6 +37,7 @@ const ROLE: Record<string, string> = {
                '- {"type":"form","title":"...","intro":"one line","cta":"Send","fields":[{"name":"name","label":"Full name"},{"name":"email","label":"Email","type":"email"},{"name":"message","label":"Message","type":"textarea"}],"form":"contact"}  (a REAL form whose submissions are stored in the database — put one on a contact / get-in-touch / sign-up / stockists page. "form" names the table bucket, default "contact".)\n' +
                '- {"type":"feed","title":"...","intro":"one line","form":"listing","empty":"Nothing here yet."}  (a LIVE list of the site\'s own PUBLIC submissions to the form with the SAME "form" name — for a directory / listings / reviews / community wall. Pair it with a {"type":"form","form":"listing"} so visitors add an entry and SEE it appear. Use for app/store/directory briefs. NEVER point a feed at a private "contact" form.)\n' +
                '- {"type":"collection","title":"...","intro":"one line","table":"items","empty":"Nothing here yet."}  (a LIVE list rendered from the project\'s REAL database table named "table" — products, menu, listings, fleet. Use for app/store pages; the database department must CREATE and SEED that exact table. Reads the live DB.)\n' +
+               '- {"type":"form","table":"listings","title":"Add yours","cta":"Add"}  (an "add a record" form that writes a REAL row to the database table named "table" — the FIELDS are generated automatically from that table\'s columns, you do NOT list them. Pair it with a {"type":"collection","table":"<same table>"} so a visitor adds an entry and SEES it appear. Use for directory / listings / classifieds / reviews apps.)\n' +
                'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours. JSON ONLY.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',

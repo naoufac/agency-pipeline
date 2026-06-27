@@ -69,10 +69,13 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
-  // tell the build agent the app's REAL provisioned tables so a collection targets a table that exists
-  let tables: string[] = [];
-  if (task.department === 'build') { try { tables = await appdb.listTables(pool, task.project_id); } catch {} }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables };
+  // the app's REAL provisioned tables (so a collection/form targets a table that exists) + the typed
+  // form-columns per table (so the renderer generates an "add a record" form that matches the schema)
+  let tables: string[] = []; const forms: Record<string, any[]> = {};
+  if (task.department === 'build') {
+    try { tables = await appdb.listTables(pool, task.project_id); for (const t of tables) forms[t] = await appdb.formColumns(pool, task.project_id, t); } catch {}
+  }
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -94,7 +97,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
           throw new Error('build did not return a valid spec (need brand + >=2 sections)');
         const slug = task.artifact.replace(/\.html$/, '');
-        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme });
+        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms });
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
       } else {
