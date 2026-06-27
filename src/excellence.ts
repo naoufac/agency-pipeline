@@ -27,10 +27,12 @@ export function applyExcellence(html: string): string {
   let dir: string | null = null;
   try {
     dir = mkdtempSync(join(tmpdir(), 'relay-tw-'));
-    writeFileSync(join(dir, 'page.html'), html);
-    writeFileSync(join(dir, 'in.css'), '@import "tailwindcss";\n' + BASE_CSS);
-    execFileSync(TW, ['-i', join(dir, 'in.css'), '-o', join(dir, 'out.css'), '--content', join(dir, 'page.html'), '--minify'],
-      { timeout: 30000, stdio: 'ignore' });
+    const pagePath = join(dir, 'page.html');
+    writeFileSync(pagePath, html);
+    // source(none) disables Tailwind v4's broad auto-detection (which scans the whole tree, ~1min);
+    // @source scopes scanning to JUST this page -> ~150ms, only the utilities this page uses.
+    writeFileSync(join(dir, 'in.css'), `@import "tailwindcss" source(none);\n@source "${pagePath}";\n` + BASE_CSS);
+    execFileSync(TW, ['-i', join(dir, 'in.css'), '-o', join(dir, 'out.css'), '--minify'], { timeout: 20000, stdio: 'ignore' });
     let css = readFileSync(join(dir, 'out.css'), 'utf8');
     css = css.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim();           // strip leading license comment (contains a URL)
     if (!css) return html;

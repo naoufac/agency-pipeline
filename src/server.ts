@@ -64,6 +64,21 @@ const server = http.createServer(async (req, res) => {
 
     if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
 
+    if (path === '/roadmap') {
+      const md = readFileSync(new URL('../ROADMAP.md', import.meta.url), 'utf8');
+      const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relay — Roadmap</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>body{background:#0B0E14;margin:0}.markdown-body{box-sizing:border-box;max-width:920px;margin:0 auto;padding:56px 24px;background:transparent}
+.bar{position:sticky;top:0;background:rgba(11,14,20,.8);backdrop-filter:blur(10px);border-bottom:1px solid #222B3B;padding:12px 24px;font:600 15px Inter,system-ui;color:#EAEDF5}
+.bar a{color:#7C7AFF;text-decoration:none;margin-left:16px;font-weight:500}</style></head>
+<body><div class="bar">⟫ Relay — Roadmap <a href="/">▸ Open the app</a></div>
+<article class="markdown-body" id="c"></article>
+<script>document.getElementById('c').innerHTML=marked.parse(${JSON.stringify(md)});</script></body></html>`;
+      return send(res, 200, 'text/html; charset=utf-8', page);
+    }
+
     // serve the produced website(s): /sites/<projectId>/[file]
     if (path.startsWith('/sites/')) {
       let rel = decodeURIComponent(path.slice('/sites/'.length)).replace(/\.\.+/g, '');
