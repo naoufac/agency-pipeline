@@ -24,9 +24,16 @@ function sqlBody(content: string): string { const s = stripFences(content); cons
 // legitimately references another schema or session settings — so blocking these is free safety.
 function assertConfined(ddl: string) {
   const lower = ddl.toLowerCase();
-  for (const bad of ['public.', 'pg_catalog', 'pg_class', 'information_schema', 'search_path', 'set role', 'set session', 'create schema', 'drop schema', 'drop database', 'alter system', '\\connect', 'dblink', 'copy ', 'pg_read', 'pg_sleep'])
+  // the engine pool is a superuser, so block anything beyond plain tables/indexes/inserts: cross-schema
+  // refs, session settings, procedural/privilege/extension constructs, and IO functions.
+  for (const bad of ['public.', 'pg_catalog', 'pg_class', 'information_schema', 'search_path', 'set role',
+    'set session', 'create schema', 'drop schema', 'drop database', 'alter system', '\\connect', 'dblink',
+    'copy ', 'pg_read', 'pg_sleep', 'create extension', 'create or replace', 'create function',
+    'create trigger', 'create policy', 'security definer', 'grant ', 'revoke ', 'alter role', 'alter user'])
     if (lower.includes(bad)) throw new Error('appdb: schema DDL contains a disallowed construct: ' + bad.trim());
 }
+
+const SENSITIVE = /pass|secret|token|hash|salt|api_?key|private|credential/i;   // never expose these via the public read API
 
 // Provision the project's schema FOR REAL: drop+recreate its isolated namespace and apply the DDL (+ any
 // seed INSERTs) inside it. Idempotent — a rebuild re-provisions cleanly. Returns the tables that now exist.
@@ -68,7 +75,7 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
   if (!tables.includes(table)) return [];
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
   const r = await pool.query(`select * from "${schema}"."${table}" limit ${lim}`);
-  return r.rows;
+  return r.rows.map((row: any) => { const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k]; return o; });
 }
 
 // Insert one row into a REAL project table — only into columns that actually exist, fully parameterized.
