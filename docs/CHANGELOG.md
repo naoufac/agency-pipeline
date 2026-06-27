@@ -4,6 +4,14 @@ A running record of shipped advancements. Every entry is backed by a **determini
 
 ## 2026-06-27
 
+### Roadmap 08 — Editable CMS ✅
+Edit a page's content and re-publish it through the same verified path.
+- **What:** every build now freezes each page's editable HTML (post-media, pre-excellence, with stable `data-edit` ids) in Postgres (`page_snapshots` + `page_blocks`). A new **Edit** tab (`#/p/:id/edit`, mobile-first) lets you change any page's copy block-by-block. **Publish** re-renders just that page by deterministically overlaying the edits onto the frozen snapshot (no LLM — the design cannot drift), runs the IDENTICAL `site_renders` gate against a `<slug>.html.tmp`, and atomically renames it over the live file **only on pass**. `src/cms.ts` holds the core; the build & republish share one finalize path so they can't diverge.
+- **Design choice:** the panel disqualified "re-run the build LLM" (temp 0.7 → silent redesign on a one-word edit) and "patch the on-disk file" (`applyExcellence` double-inlines CSS). Frozen-snapshot + string-overlay + atomic `.tmp` swap is the only approach that keeps edits deterministic AND zero-trust.
+- **Verified end-to-end:** edited a hero headline → published → live file contains the new text, **only 2 lines changed** (design byte-identical), still passes the gate; a second edit **persisted** the first (dirty-flag fix); a deliberately breaking edit (`[Placeholder]`) was **rejected** with the live page untouched. Mobile editor verified at 390px.
+- **v1 scope:** text editing. Photo-swap and inline-styled (read-only) headings are the next increment.
+
+
 ### Roadmap 07 — Email platform ✅
 Production email from `noreply@naples.agency`.
 - **What:** authenticated SMTP (`nodemailer`, `src/mailer.ts`) through the domain's cPanel mail server, which is in the domain SPF, signs DKIM (default selector), and has DMARC — so mail is inbox-aligned. Wired in as `sendMail`/`verifyMailer` + `npm run mail:test`. (Outbound :25 is blocked on this box, so a self-hosted MTA was never viable — this is the correct production route.)

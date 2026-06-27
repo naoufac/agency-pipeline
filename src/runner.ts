@@ -4,8 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
 import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
-import { applyExcellence } from './excellence.ts';
-import { processMedia } from './media.ts';
+import * as cms from './cms.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -58,23 +57,13 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
     await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
 
-    // REAL ARTIFACT: if this task writes a file, persist it to the project workspace on disk
+    // REAL ARTIFACT: write the page AND freeze its editable snapshot (post-media, pre-excellence, with edit ids)
+    let snapshot: string | null = null;
     if (task.artifact) {
       const dir = new URL(task.project_id + '/', SITES);
       mkdirSync(fileURLToPath(dir), { recursive: true });
-      let body = content.replace(/^\s*```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '');
-      const at = body.search(/<!doctype html|<html/i); if (at > 0) body = body.slice(at);
-      body = await processMedia(body, dir);   // fill <img data-q="..."> with real local Pexels photos
-      // deterministic safety net: a website must never ship broken external/placeholder images
-      body = body
-        .replace(/<script\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[\s\S]*?<\/script>/gi, '')   // strip external scripts (e.g. tailwind CDN) — we compile+inline
-        .replace(/<link\b[^>]*\bhref\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')               // strip external links (e.g. Google Fonts preconnect/css) — fonts are inlined
-        .replace(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
-        .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
-        .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)")
-        .replace(/url\(\s*["']?[^)]*placeholder[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)");
-      body = applyExcellence(body);   // compile Tailwind + inline real fonts -> modern, self-contained
-      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
+      snapshot = cms.instrument(await cms.cleanBody(content, dir));      // real media + sanitize, then stamp edit ids
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // == applyExcellence(cleaned): unchanged output
     }
 
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
@@ -82,6 +71,11 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     if (ok) {
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
       await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
+      // freeze the editable snapshot + blocks for the CMS (normal builds only, never a republish)
+      if (snapshot && task.artifact && !task.source) {
+        try { await cms.syncBlocks(pool, task.project_id, task.artifact.replace(/\.html$/, ''), task.artifact, snapshot); }
+        catch (e: any) { console.error('cms syncBlocks', e?.message ?? e); }
+      }
     } else {
       await ev(pool, task.project_id, task.id, 'verify_failed', `#${task.seq}: ${log}`);
       const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';

@@ -288,6 +288,24 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .sev-low{background:var(--surface-2);color:var(--muted)}
 .sev-cross{background:rgba(160,108,213,.16);color:var(--st-verifying)}
 
+/* ============ CMS editor ============ */
+.pagechips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 14px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.pagechips::-webkit-scrollbar{display:none}
+.chip{flex:none;background:var(--surface);border:1px solid var(--line);color:var(--muted);border-radius:var(--rpill);padding:8px 15px;font:inherit;font-size:14px;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--surface-2);color:var(--text);border-color:var(--accent)}
+.dotpip{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--st-ready);margin-left:6px;vertical-align:middle}
+.editor-block{background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;margin-bottom:12px}
+.editor-block.ro{opacity:.55}
+.eb-label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:7px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.eb-saved{font-size:11px;text-transform:none;letter-spacing:0;color:var(--st-done)}
+.eb-saved.err{color:var(--st-failed)}
+.eb-input{width:100%;background:var(--ink);border:1px solid var(--line);color:var(--text);font:inherit;font-size:15px;line-height:1.5;border-radius:var(--r1);padding:10px 12px;resize:none;outline:none;display:block}
+.eb-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,122,255,.15)}
+.eb-ro{font-size:14px;color:var(--muted);white-space:pre-wrap}
+.editor-actionbar{position:sticky;bottom:0;display:flex;align-items:center;gap:12px;justify-content:space-between;margin-top:6px;padding:14px 0 18px;background:linear-gradient(transparent,var(--ink) 35%)}
+.editor-actionbar .btn{flex:none}
+#editstate{font-size:13px}
+
 /* ============ docs · visual system map ============ */
 .pipe{display:flex;flex-direction:column;gap:8px;margin-top:20px;max-width:760px}
 .pipe-node{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r2);padding:14px 18px}

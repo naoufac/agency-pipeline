@@ -146,7 +146,7 @@ const tabLink = (id, key, label, cur) =>
 
 function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
-  let wasBuilt = false, prow = {};
+  let wasBuilt = false, prow = {}, editInit = false;
 
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
@@ -160,7 +160,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}
       </div>`;
   }
 
@@ -248,6 +248,66 @@ function project(id, tab, seq){
       <div class="kpis">${all.map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
   }
 
+  // ---- EDIT tab: change a page's copy in place, publish through the verified path ----
+  async function editTab(){
+    const body = document.getElementById('pbody');
+    body.innerHTML = `<p class="muted" style="margin:4px 0 14px">Edit the words on any page. <b style="color:var(--text)">Publish</b> rebuilds just that page and only goes live if it passes the same checks — your design never changes, only the text.</p>
+      <div id="edithead"></div><div id="editblocks"></div><div id="editbar"></div>`;
+    const autosize = t => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
+    let data; try { data = await j('/api/pages?id=' + id); } catch { document.getElementById('editblocks').innerHTML = '<div class="empty">Couldn’t load pages.</div>'; return; }
+    const editable = (data.pages || []).filter(p => p.editable);
+    if (!editable.length) { body.innerHTML = `<div class="empty" style="text-align:left"><h3 style="margin-bottom:8px">Editing isn’t enabled for this site yet.</h3><p class="muted">It was built before in-place editing existed. Re-run it (Site → Re-run) and the new build will be editable.</p></div>`; return; }
+    let cur = editable[0].slug;
+    const head = document.getElementById('edithead');
+    function chips(){
+      head.innerHTML = `<div class="pagechips">${editable.map(p => `<button class="chip${p.slug === cur ? ' on' : ''}" data-slug="${p.slug}">${esc(p.title)}${p.drafts ? '<i class="dotpip"></i>' : ''}</button>`).join('')}</div>`;
+      head.querySelectorAll('.chip').forEach(c => c.onclick = () => { cur = c.getAttribute('data-slug'); chips(); loadPage(); });
+    }
+    async function loadPage(){
+      const el = document.getElementById('editblocks');
+      el.innerHTML = `<div class="muted" style="padding:18px 2px">Loading…</div>`;
+      let pg; try { pg = await j(`/api/page?id=${id}&slug=${encodeURIComponent(cur)}`); } catch { el.innerHTML = '<div class="empty">Not editable.</div>'; return; }
+      el.innerHTML = pg.blocks.map(bl => bl.read_only
+        ? `<div class="editor-block ro"><div class="eb-label">${esc(bl.label)} · not editable yet</div><div class="eb-ro">${esc(bl.value)}</div></div>`
+        : `<div class="editor-block"><div class="eb-label">${esc(bl.label)}<span class="eb-saved" data-saved="${bl.block_id}">${bl.edited ? 'edited' : ''}</span></div><textarea class="eb-input" data-bid="${bl.block_id}" rows="1">${esc(bl.value)}</textarea></div>`
+      ).join('') || '<div class="empty">No editable text on this page.</div>';
+      el.querySelectorAll('textarea[data-bid]').forEach(t => {
+        autosize(t); let to;
+        t.addEventListener('input', () => { autosize(t); clearTimeout(to); to = setTimeout(() => saveBlock(t.getAttribute('data-bid'), t.value, t), 700); });
+      });
+    }
+    async function saveBlock(bid, value, t){
+      const tag = t.closest('.editor-block').querySelector(`[data-saved="${bid}"]`);
+      if (tag) { tag.textContent = 'saving…'; tag.classList.remove('err'); }
+      try {
+        const r = await fetch('/api/page/save', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id, slug: cur, blocks: [{ block_id: bid, value }] }) });
+        const jr = await r.json().catch(() => ({}));
+        if (tag) { if (!r.ok) { tag.textContent = jr.error || 'error'; tag.classList.add('err'); } else tag.textContent = 'saved ✓'; }
+      } catch { if (tag) tag.textContent = 'offline'; }
+    }
+    function bar(){
+      const el = document.getElementById('editbar');
+      el.innerHTML = `<div class="editor-actionbar"><span id="editstate" class="muted"></span><button class="btn" id="pubbtn">Publish page</button></div>`;
+      document.getElementById('pubbtn').onclick = publish;
+    }
+    async function publish(){
+      const btn = document.getElementById('pubbtn'), st = document.getElementById('editstate');
+      btn.disabled = true; btn.textContent = 'Publishing…'; st.innerHTML = '';
+      try {
+        const r = await fetch('/api/page/publish', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id, slug: cur }) });
+        if (!r.ok && r.status !== 409) { const e = await r.json().catch(() => ({})); st.innerHTML = `<span class="s-failed">${esc(e.error || 'failed')}</span>`; btn.disabled = false; btn.textContent = 'Publish page'; return; }
+        const t0 = Date.now();
+        const pl = setInterval(async () => {
+          let s; try { s = await j(`/api/page/status?id=${id}&slug=${encodeURIComponent(cur)}`); } catch { return; }
+          if (s.state === 'live') { clearInterval(pl); st.innerHTML = '<span class="s-done">✓ Live</span>'; btn.disabled = false; btn.textContent = 'Publish page'; toast('✓ Page published'); }
+          else if (s.state === 'failed') { clearInterval(pl); st.innerHTML = `<span class="s-failed">✗ ${esc(s.log || 'couldn’t publish')}</span>`; btn.disabled = false; btn.textContent = 'Publish page'; }
+          else if (Date.now() - t0 > 90000) { clearInterval(pl); st.textContent = 'still working…'; btn.disabled = false; btn.textContent = 'Publish page'; }
+        }, 1500);
+      } catch { btn.disabled = false; btn.textContent = 'Publish page'; st.textContent = 'network error'; }
+    }
+    chips(); bar(); loadPage();
+  }
+
   async function load(){
     let b; try { b = await j('/api/board?id=' + id); } catch { return; }
     if (!b.project){ app.innerHTML = `<div class="container section"><div class="empty">Project not found. <a href="#/">‹ Your sites</a></div></div>`; clearPoll(); return; }
@@ -259,6 +319,7 @@ function project(id, tab, seq){
     else if (tab === 'build') buildTab(b);
     else if (tab === 'files') filesTab(b);
     else if (tab === 'metrics') metricsTab();
+    else if (tab === 'edit') { if (!editInit) { editInit = true; editTab(b); } }
     // resolution moment
     if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
     wasBuilt = built;
@@ -284,7 +345,7 @@ function roadmap(){
     { n:'05', t:'Built to last', s:'done', d:'Every piece supervised by systemd (Restart=always): Relay, the Cloudflare tunnel and Postgres survive any crash or reboot — proven by kill-tests. Plus a full doc set and a live Review page so the work stays visible, not buried in files.' },
     { n:'06', t:'Real media', s:'done', d:'The build agent names the photos each section needs; Relay pulls real licensed Pexels images, downloads them into the site and serves them locally — gate-safe, never a broken link. Verified on a live build.' },
     { n:'07', t:'Email platform', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP through the domain mail server, SPF/DKIM/DMARC aligned (inbox-grade), wired into Relay as a reusable mailer. Verified: live delivery to a real inbox.' },
-    { n:'08', t:'Editable CMS', s:'next', d:'Pages & blocks in Postgres; edit content and re-publish a single page through the same verified build path.' },
+    { n:'08', t:'Editable CMS', s:'done', d:'Edit any page’s copy in place; “Publish” re-renders just that page from a frozen snapshot and ships it ONLY if it re-passes the same gate — the design never drifts and a bad edit never replaces a working page. Verified end-to-end (deterministic edits + rejected-on-break).' },
     { n:'09', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
@@ -400,6 +461,7 @@ function docsPage(){
     { t:'Dedicated tunnel', d:'systemd · own tunnel · board/api/email', s:'ok' },
     { t:'Real photography', d:'Pexels · downloaded + served locally', s:'ok' },
     { t:'Production email', d:'SMTP · SPF/DKIM/DMARC aligned', s:'ok' },
+    { t:'Editable CMS', d:'edit copy · republish · re-verified', s:'ok' },
   ];
   const verify = [
     ['site_renders','headless Chromium screenshot must be non-blank, structural, no external/placeholder assets'],
@@ -461,7 +523,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
-  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));

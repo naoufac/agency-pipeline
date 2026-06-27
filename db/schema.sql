@@ -97,3 +97,34 @@ $$ language plpgsql;
 
 create trigger trg_unblock after update on tasks
 for each row execute function fn_unblock();
+
+-- ===== CMS (roadmap 08): per-page editable snapshot + blocks =====
+create table if not exists page_snapshots (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references projects(id) on delete cascade,
+  slug        text not null,
+  artifact    text not null,
+  src_html    text not null,
+  state       text not null default 'live',
+  log         text not null default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (project_id, slug)
+);
+create table if not exists page_blocks (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references projects(id) on delete cascade,
+  slug        text not null,
+  block_id    text not null,
+  kind        text not null,
+  label       text not null default '',
+  seq         int  not null default 0,
+  published   text not null default '',
+  draft       text,
+  read_only   boolean not null default false,
+  updated_at  timestamptz not null default now(),
+  unique (project_id, slug, block_id)
+);
+create index if not exists page_blocks_page_ix on page_blocks(project_id, slug, seq);
+alter table tasks add column if not exists source text;
+alter table page_blocks add column if not exists dirty boolean not null default false;
