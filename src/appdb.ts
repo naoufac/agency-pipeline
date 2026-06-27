@@ -20,6 +20,18 @@ export function schemaName(projectId: string): string {
 const stripFences = (s: string) => s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
 function sqlBody(content: string): string { const s = stripFences(content); const at = s.search(/create\s+table/i); return at >= 0 ? s.slice(at) : s; }
 
+// Strip SQL comments and normalize whitespace (incl. around dots) so the confinement denylist can't be
+// fooled by `public /* */ . foo`, `copy\nfrom`, or `set/**/role`. The SANITIZED text is what we both
+// validate AND execute, so what passes the check is exactly what runs.
+function sanitizeDdl(content: string): string {
+  return sqlBody(content)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')   // /* block comments */
+    .replace(/--[^\n]*/g, ' ')           // -- line comments
+    .replace(/\s+/g, ' ')                // collapse whitespace/newlines
+    .replace(/\s*\.\s*/g, '.')           // "public . foo" / "public/**/.foo" -> "public.foo"
+    .trim();
+}
+
 // Reject any DDL that could escape the project's schema or touch the engine. Generated app DDL never
 // legitimately references another schema or session settings — so blocking these is free safety.
 function assertConfined(ddl: string) {
@@ -39,15 +51,19 @@ const SENSITIVE = /pass|secret|token|hash|salt|api_?key|private|credential/i;   
 // seed INSERTs) inside it. Idempotent — a rebuild re-provisions cleanly. Returns the tables that now exist.
 export async function provision(pool: pg.Pool, projectId: string, content: string): Promise<{ schema: string; tables: string[] }> {
   const schema = schemaName(projectId);
-  const ddl = sqlBody(content);
+  const ddl = sanitizeDdl(content);
   if (!/create\s+table/i.test(ddl)) throw new Error('appdb: no CREATE TABLE in the schema output');
   assertConfined(ddl);
+  // IDEMPOTENT + non-destructive: if the project schema is already provisioned, keep its data — never
+  // re-drop on a rebuild or a verify retry (that would wipe the live app's records).
+  const existing = await listTables(pool, projectId);
+  if (existing.length) return { schema, tables: existing };
   const c = await pool.connect();
   try {
     await c.query('begin');
-    await c.query(`drop schema if exists "${schema}" cascade`);   // only ever app_<hex> — never public
-    await c.query(`create schema "${schema}"`);
-    await c.query(`set local search_path to "${schema}"`);         // unqualified CREATE/INSERT land HERE; tx-scoped
+    await c.query("set local statement_timeout = '15s'");           // bound pathological/runaway DDL
+    await c.query(`create schema if not exists "${schema}"`);        // never public; safe under concurrency
+    await c.query(`set local search_path to "${schema}"`);           // unqualified CREATE/INSERT land HERE; tx-scoped
     await c.query(ddl);
     await c.query('commit');
   } catch (e) { try { await c.query('rollback'); } catch {} throw e; }

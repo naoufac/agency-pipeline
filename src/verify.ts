@@ -69,7 +69,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
   if (rule === 'sql_applies') {
     let sql = stripFences(content); const at = sql.search(/create\s+table/i); if (at >= 0) sql = sql.slice(at);
     const c = await pool.connect();
-    try { await c.query('begin'); await c.query(sql); await c.query('rollback'); return { ok: true, log: 'sql applied cleanly' }; }
+    try { await c.query('begin'); await c.query("set local statement_timeout='15s'"); await c.query(sql); await c.query('rollback'); return { ok: true, log: 'sql applied cleanly' }; }
     catch (e: any) { try { await c.query('rollback'); } catch {} return { ok: false, log: 'sql error: ' + (e?.message ?? e) }; }
     finally { c.release(); }
   }

@@ -30,11 +30,13 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   if (arr.length >= max) { map.set(ip, arr); return true; }
   arr.push(now); map.set(ip, arr); return false;
 }
-const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>();
+const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 const publishLimited = (ip: string) => limited(PUB_HITS, PUB_MAX_PER_IP, ip); // /api/page/publish: cheap + frequent during editing
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
+const readLimited = (ip: string) => limited(READ_HITS, Number(process.env.READ_MAX || 240), ip); // public content reads (feed/collection) — generous; just caps bulk harvesting
+const clientIp = (req: http.IncomingMessage) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {
@@ -187,6 +189,7 @@ const server = http.createServer(async (req, res) => {
     // ---- Live per-project DB: read/insert rows from the produced app's OWN isolated schema ----
     const dataM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/data\/([a-zA-Z_][a-zA-Z0-9_]{0,62})$/);
     if (dataM && req.method === 'GET') {
+      if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"rows":[],"error":"rate limited"}');
       try { return send(res, 200, 'application/json', JSON.stringify({ rows: await appdb.readRows(pool, dataM[1], dataM[2], Number(url.searchParams.get('limit') || 50)) })); }
       catch { return send(res, 200, 'application/json', '{"rows":[]}'); }
     }
@@ -201,6 +204,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"submissions":[],"error":"rate limited"}');
       const form = url.searchParams.get('form');   // public feeds pass a form name; the operator's Data tab omits it (all forms)
       const r = form
         ? await pool.query('select form, data, created_at from site_submissions where project_id=$1 and form=$2 order by created_at desc limit 200', [id, form.slice(0, 60)])
