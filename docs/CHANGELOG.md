@@ -4,6 +4,14 @@ A running record of shipped advancements. Every entry is backed by a **determini
 
 ## 2026-06-27
 
+### Roadmap 09 — Visual self-QA ✅ + mobile nav fix
+Relay now *looks at its own work* and reports problems.
+- **What:** after every build (and on demand via the QA tab), Relay screenshots each page at **phone (390px) + desktop (1280px)**, sends each to a **vision model (Gemini 2.5-flash)** that reports concrete, visible problems (broken/overflowing nav, truncation, low contrast, placeholder text, weak hierarchy) and a 1–10 score. Stored per page/viewport in `qa_reviews`, surfaced in a new **QA tab** (screenshot + score + issues) with a "Re-run review" button. `src/vision.ts` + `src/qa.ts`; `/api/qa` + `/api/qa/run`; auto-runs from `runLoop` on completion.
+- **Mobile nav (deterministic):** the build agent was emitting desktop-only navs that overflowed on phones. The excellence layer now injects a real **hamburger** (tags the link list + a toggle button) + an `overflow-x` / `flex-wrap` safety net — so a produced nav can never overflow/cut off on a phone, regardless of what the model emits. Verified: clean "brand · ☰ · CTA" on a 390px screen.
+- **Proof:** the QA loop immediately flagged the real mobile-nav issue (and caught leftover `EDIT-` placeholder copy from testing) — score went from 2/10 (broken nav) upward after the fix.
+- **Gotcha fixed:** Gemini 2.5-flash is a *thinking* model; a low `maxOutputTokens` was consumed by reasoning and returned empty — set `thinkingBudget: 0`.
+
+
 ### Roadmap 08 — Editable CMS ✅
 Edit a page's content and re-publish it through the same verified path.
 - **What:** every build now freezes each page's editable HTML (post-media, pre-excellence, with stable `data-edit` ids) in Postgres (`page_snapshots` + `page_blocks`). A new **Edit** tab (`#/p/:id/edit`, mobile-first) lets you change any page's copy block-by-block. **Publish** re-renders just that page by deterministically overlaying the edits onto the frozen snapshot (no LLM — the design cannot drift), runs the IDENTICAL `site_renders` gate against a `<slug>.html.tmp`, and atomically renames it over the live file **only on pass**. `src/cms.ts` holds the core; the build & republish share one finalize path so they can't diverge.

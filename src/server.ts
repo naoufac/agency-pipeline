@@ -9,6 +9,7 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { republishPage } from './cms.ts';
+import { reviewSite } from './qa.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -163,6 +164,24 @@ const server = http.createServer(async (req, res) => {
       if (!claim.rowCount) return send(res, 409, 'application/json', '{"error":"already publishing"}');
       republishPage(pool, id, slug).catch((e) => console.error('republish', id, slug, e?.message));   // fire-and-forget; status polled
       return send(res, 202, 'application/json', '{"ok":true,"state":"publishing"}');
+    }
+
+    // ---- Visual QA: a vision model reads the produced pages + reports issues ----
+    if (path === '/api/qa') {
+      const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const r = await pool.query('select slug, viewport, score, issues, shot from qa_reviews where project_id=$1 order by slug, viewport', [id]);
+      const scores = r.rows.map((x: any) => x.score).filter((s: number) => s > 0);
+      const overall = scores.length ? Math.min(...scores) : null;
+      return send(res, 200, 'application/json', JSON.stringify({ overall, reviews: r.rows }));
+    }
+    if (path === '/api/qa/run' && req.method === 'POST') {
+      let raw = ''; for await (const c of req) raw += c;
+      let id = ''; try { id = (JSON.parse(raw || '{}').id || '').trim(); } catch {}
+      if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const ip = String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+      if (publishLimited(ip)) return send(res, 429, 'application/json', '{"error":"slow down"}');
+      reviewSite(pool, id).catch((e) => console.error('qa run', id, e?.message));   // fire-and-forget; polled via /api/qa
+      return send(res, 202, 'application/json', '{"ok":true}');
     }
 
     if (path === '/api/run' && req.method === 'POST') {

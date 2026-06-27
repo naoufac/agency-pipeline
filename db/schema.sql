@@ -128,3 +128,14 @@ create table if not exists page_blocks (
 create index if not exists page_blocks_page_ix on page_blocks(project_id, slug, seq);
 alter table tasks add column if not exists source text;
 alter table page_blocks add column if not exists dirty boolean not null default false;
+create table if not exists qa_reviews (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references projects(id) on delete cascade,
+  slug        text not null,
+  viewport    text not null,
+  score       int  not null default 0,
+  issues      jsonb not null default '[]',
+  shot        text not null default '',
+  created_at  timestamptz not null default now()
+);
+create index if not exists qa_reviews_proj_ix on qa_reviews(project_id);

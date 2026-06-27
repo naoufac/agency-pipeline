@@ -5,6 +5,7 @@ import { ev, counts } from './db.ts';
 import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import * as cms from './cms.ts';
+import { reviewSite } from './qa.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,5 +120,6 @@ export async function runLoop(
   const c = await counts(pool, projectId);
   const done = (c.blocked + c.ready + c.running) === 0 && c.failed === 0;
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
+  if (done) reviewSite(pool, projectId).catch(() => {});   // auto visual-QA on completion (fire-and-forget)
   return { stopped: done ? 'complete' : 'blocked', steps };
 }

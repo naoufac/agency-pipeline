@@ -16,14 +16,36 @@ html{ scroll-behavior:smooth; }
 body{ font-family:var(--font-body),system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
 h1,h2,h3,h4,.font-display{ font-family:var(--font-display),system-ui,sans-serif; letter-spacing:-0.02em; }
 .font-serif-display{ font-family:"Fraunces",Georgia,serif; letter-spacing:-0.01em; }
-/* mobile safety net — a produced site must never overflow or cut off its nav on a phone */
+/* mobile safety net + injected hamburger — a produced nav must never overflow/cut off on a phone */
 html,body{ overflow-x:hidden; }
+.relay-burger{ display:none; background:transparent; border:0; font-size:1.6rem; line-height:1; cursor:pointer; padding:.2rem .5rem; color:inherit }
 @media (max-width:680px){
-  nav ul, header ul{ flex-wrap:wrap; }
   nav > div, header > div, header > nav{ flex-wrap:wrap; gap:.45rem .8rem; }
   nav, header{ max-width:100vw; }
+  .relay-burger{ display:inline-flex; align-items:center; margin-left:auto }
+  .relay-navlinks{ display:none !important; order:99; flex-basis:100%; flex-direction:column; align-items:flex-start; gap:.5rem; padding:.5rem 0 }
+  .relay-open .relay-navlinks{ display:flex !important }
+  nav ul:not(.relay-navlinks), header ul:not(.relay-navlinks){ flex-wrap:wrap }
 }
 `;
+
+// Deterministic mobile hamburger: tag the nav's link list + inject a toggle button. Never throws.
+// (If the nav has no <ul>, the flex-wrap safety net above still prevents overflow.)
+function navMobilify(html: string): string {
+  try {
+    const m = html.match(/<(nav|header)\b[\s\S]*?<\/\1>/i);
+    if (!m || /relay-burger/.test(m[0])) return html;
+    let nav = m[0];
+    if (!/<ul\b/i.test(nav)) return html;                       // no link list -> rely on flex-wrap
+    nav = nav.replace(/<ul\b([^>]*)>/i, (um, attrs) =>
+      /class\s*=\s*["']/i.test(attrs)
+        ? um.replace(/class\s*=\s*(["'])/i, 'class=$1relay-navlinks ')
+        : `<ul class="relay-navlinks"${attrs}>`);
+    nav = nav.replace(/(<ul\b[^>]*relay-navlinks)/i,
+      `<button class="relay-burger" aria-label="Menu" onclick="this.closest('nav,header').classList.toggle('relay-open')">☰</button>$1`);
+    return html.replace(m[0], nav);
+  } catch { return html; }
+}
 
 export function tailwindAvailable(): boolean { return existsSync(TW); }
 
@@ -49,6 +71,8 @@ export function applyExcellence(html: string): string {
     const style = `<style>${css}</style>`;
     // drop any stylesheet <link> / app.css the agent may have added; inline our compiled CSS instead
     let out = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, '').replace(/<link\b[^>]*app\.css[^>]*>/gi, '');
+    out = navMobilify(out);                                    // inject the mobile hamburger
+
     if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + '</head>');
     if (/<body[^>]*>/i.test(out)) return out.replace(/(<body[^>]*>)/i, '$1' + style);
     return style + out;

@@ -146,7 +146,7 @@ const tabLink = (id, key, label, cur) =>
 
 function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
-  let wasBuilt = false, prow = {}, editInit = false;
+  let wasBuilt = false, prow = {}, editInit = false, qaInit = false;
 
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
@@ -160,7 +160,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}${b.site ? tabLink(id,'qa','QA',tab) : ''}
       </div>`;
   }
 
@@ -308,6 +308,33 @@ function project(id, tab, seq){
     chips(); bar(); loadPage();
   }
 
+  // ---- QA tab: Relay screenshots each page (phone + desktop) and a vision model reviews them ----
+  async function qaTab(){
+    const tone = s => s >= 8 ? 'good' : s >= 5 ? 'warn' : 'bad';
+    const body = document.getElementById('pbody');
+    body.innerHTML = `<div class="qa-head"><p class="muted" style="margin:4px 0 0;flex:1;min-width:200px">Relay screenshots every page at phone + desktop and a vision model reads them for real problems. Lower score = more issues.</p><button class="btn btn-sm" id="qarun">Re-run review</button></div><div id="qabody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    async function render(){
+      let d; try { d = await j('/api/qa?id=' + id); } catch { return 0; }
+      const el = document.getElementById('qabody'); if (!el) return 0;
+      if (!d.reviews || !d.reviews.length) { el.innerHTML = `<div class="empty">No review yet — tap “Re-run review”.</div>`; return 0; }
+      el.innerHTML = `<div class="qa-overall tone-${tone(d.overall || 0)}">Overall score <b>${d.overall ?? '—'}/10</b><span class="muted"> · worst page</span></div>
+        <div class="qa-grid">${d.reviews.map(r => `
+          <div class="qa-card">
+            <a class="qa-shotwrap" href="/sites/${id}/${r.shot}" target="_blank" rel="noopener"><img src="/sites/${id}/${r.shot}?t=${prow.id ? '' : ''}${Date.now()}" loading="lazy" alt=""></a>
+            <div class="qa-meta"><span class="pill">${esc(r.slug)} · ${r.viewport}</span><span class="qa-score tone-${tone(r.score)}">${r.score}/10</span></div>
+            ${(r.issues && r.issues.length) ? `<ul class="qa-issues">${r.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul>` : `<p class="muted" style="font-size:13px;margin-top:8px">No issues flagged ✓</p>`}
+          </div>`).join('')}</div>`;
+      return d.reviews.length;
+    }
+    document.getElementById('qarun').onclick = async () => {
+      const btn = document.getElementById('qarun'); btn.textContent = 'Reviewing…'; btn.disabled = true;
+      try { await fetch('/api/qa/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) }); } catch {}
+      let tries = 0;
+      const iv = setInterval(async () => { tries++; await render(); if (tries > 36) { clearInterval(iv); btn.textContent = 'Re-run review'; btn.disabled = false; } }, 5000);
+    };
+    await render();
+  }
+
   async function load(){
     let b; try { b = await j('/api/board?id=' + id); } catch { return; }
     if (!b.project){ app.innerHTML = `<div class="container section"><div class="empty">Project not found. <a href="#/">‹ Your sites</a></div></div>`; clearPoll(); return; }
@@ -320,6 +347,7 @@ function project(id, tab, seq){
     else if (tab === 'files') filesTab(b);
     else if (tab === 'metrics') metricsTab();
     else if (tab === 'edit') { if (!editInit) { editInit = true; editTab(b); } }
+    else if (tab === 'qa') { if (!qaInit) { qaInit = true; qaTab(); } }
     // resolution moment
     if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
     wasBuilt = built;
@@ -346,7 +374,8 @@ function roadmap(){
     { n:'06', t:'Real media', s:'done', d:'The build agent names the photos each section needs; Relay pulls real licensed Pexels images, downloads them into the site and serves them locally — gate-safe, never a broken link. Verified on a live build.' },
     { n:'07', t:'Email platform', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP through the domain mail server, SPF/DKIM/DMARC aligned (inbox-grade), wired into Relay as a reusable mailer. Verified: live delivery to a real inbox.' },
     { n:'08', t:'Editable CMS', s:'done', d:'Edit any page’s copy in place; “Publish” re-renders just that page from a frozen snapshot and ships it ONLY if it re-passes the same gate — the design never drifts and a bad edit never replaces a working page. Verified end-to-end (deterministic edits + rejected-on-break).' },
-    { n:'09', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
+    { n:'09', t:'Visual self-QA', s:'done', d:'Relay screenshots every page (phone + desktop) and a vision model reads them for real problems — broken nav, overflow, low contrast, placeholder text — scoring each and surfacing the feedback in a QA tab. Runs automatically on every build. Plus a deterministic mobile hamburger so produced navs work on phones.' },
+    { n:'10', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -523,7 +552,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
-  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit','qa'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));
