@@ -1,6 +1,10 @@
 // Relay SPA — deliverable-first IA. Home (your sites) -> Project (live site is the hero) -> tabs.
 const COLOR = { blocked:'#5C6678', ready:'#E0B341', running:'#5A8DEE', verifying:'#A06CD5', done:'#36B37E', failed:'#F0506E' };
 const app = document.getElementById('app');
+// mobile nav (hamburger -> dropdown)
+const navToggle = document.getElementById('navtoggle'), navLinks = document.getElementById('navlinks');
+navToggle?.addEventListener('click', () => { const o = navLinks.classList.toggle('open'); navToggle.setAttribute('aria-expanded', String(o)); });
+navLinks?.addEventListener('click', e => { if (e.target.closest('a')) navLinks.classList.remove('open'); });
 let poll = null;
 const j = (u, o) => fetch(u, o).then(r => r.json());
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -288,7 +292,7 @@ function about(){
 
 /* ---------------- router ---------------- */
 function router(){
-  clearPoll(); closeDrawer(false);
+  clearPoll(); closeDrawer(false); navLinks?.classList.remove('open');
   let raw = location.hash.replace(/^#/, '') || '/';
   // legacy redirects
   const q0 = raw.split('?')[1] || '';

@@ -20,11 +20,14 @@
       </svg>
       <span>Relay</span>
     </a>
-    <nav class="nav-links">
+    <button class="nav-toggle" id="navtoggle" aria-label="Menu" aria-expanded="false">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <nav class="nav-links" id="navlinks">
       <a href="#/" data-route="/">Your sites</a>
       <a href="#/about" data-route="/about">About</a>
+      <a class="btn btn-sm" href="#/new">+ New site</a>
     </nav>
-    <a class="btn btn-sm nav-cta" href="#/new">+ New site</a>
   </header>
 
   <main id="app"></main>

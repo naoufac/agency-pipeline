@@ -46,11 +46,24 @@ p{margin:0} .muted{color:var(--muted)} .faint{color:var(--faint)}
 }
 .brand{display:flex; align-items:center; gap:var(--s2); font-family:var(--font-display); font-weight:700; font-size:18px; color:var(--text)}
 .brand svg{color:var(--accent)}
-.nav-links{display:flex; gap:var(--s2); margin-left:var(--s4)}
-.nav-links a{padding:var(--s2) var(--s3); border-radius:var(--r1); color:var(--muted); font-weight:500; font-size:14px}
+.nav-links{display:flex; align-items:center; gap:var(--s2); margin-left:auto}
+.nav-links a{padding:var(--s2) var(--s3); border-radius:var(--r1); color:var(--muted); font-weight:500; font-size:14px; white-space:nowrap}
 .nav-links a:hover{color:var(--text); background:var(--surface)}
 .nav-links a.active{color:var(--text); background:var(--surface-2)}
-.nav-cta{margin-left:auto}
+.nav-links a.btn{color:var(--accent-ink)}
+.nav-toggle{display:none; margin-left:auto; background:transparent; border:1px solid var(--line); color:var(--text); border-radius:var(--r1); padding:6px 8px; cursor:pointer; line-height:0}
+
+/* mobile nav: hamburger -> dropdown */
+@media(max-width:720px){
+  .nav{gap:var(--s3); padding:var(--s3) var(--s4)}
+  .nav-toggle{display:inline-flex; align-items:center}
+  .nav-links{position:absolute; top:100%; left:0; right:0; margin:0; flex-direction:column; align-items:stretch;
+    gap:4px; padding:var(--s3) var(--s4) var(--s4); background:var(--surface); border-bottom:1px solid var(--line);
+    box-shadow:var(--shadow); display:none}
+  .nav-links.open{display:flex}
+  .nav-links a{padding:var(--s3); font-size:15px}
+  .nav-links a.btn{justify-content:center; margin-top:var(--s2)}
+}
 
 /* ---- buttons / inputs ---- */
 .btn{
@@ -207,3 +220,22 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .toast{position:fixed;top:auto;bottom:32px;left:50%;transform:translateX(-50%) translateY(18px);opacity:0;transition:.3s ease;z-index:200;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast .pill{font-size:14px;padding:9px 16px;background:var(--surface-2);box-shadow:var(--shadow)}
+
+/* ============ mobile polish (phone-first) ============ */
+@media(max-width:720px){
+  .container{padding:0 16px}
+  .hero{padding:40px 0 24px} .hero.compact{padding:32px 0 16px}
+  .hero p.lead{font-size:16px}
+  .phead{padding-top:20px; gap:8px; flex-direction:column; align-items:flex-start}
+  .ptitle{font-size:20px; min-width:0; order:-1}
+  .tabs{overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tabs a{white-space:nowrap}
+  .frame iframe{height:62vh}
+  .actionbar{gap:8px}
+  .actionbar .btn, .actionbar .btn-ghost{flex:1; justify-content:center}
+  #net{height:60vh}
+  .drawer{width:100vw}
+  .foot{flex-direction:column; gap:6px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+}
