@@ -99,7 +99,15 @@ const server = http.createServer(async (req, res) => {
     const file = STATIC[path];
     if (file) {
       const ext = file.split('.').pop()!;
-      return send(res, 200, MIME[ext] || 'text/plain', readFileSync(new URL(file, WEB)));
+      let body: Buffer | string = readFileSync(new URL(file, WEB));
+      // auto cache-bust: stamp app.js/styles.css with their mtime so a change always invalidates
+      if (file === 'index.html') {
+        const v = Math.floor(Math.max(statSync(new URL('app.js', WEB)).mtimeMs, statSync(new URL('styles.css', WEB)).mtimeMs));
+        body = body.toString().replace('/styles.css', '/styles.css?v=' + v).replace('/app.js', '/app.js?v=' + v);
+      }
+      res.writeHead(200, { 'content-type': MIME[ext] || 'text/plain', 'cache-control': 'no-cache, must-revalidate', 'access-control-allow-origin': '*' });
+      res.end(body);
+      return;
     }
     send(res, 404, 'text/plain', 'not found');
   } catch (e: any) {
