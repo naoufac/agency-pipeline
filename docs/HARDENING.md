@@ -19,6 +19,7 @@ and verified, **DEFER** are real but need load-testing or cross-tenant coordinat
 - **Database backups (was MISSING).** 21 projects / 190 tasks / 203 outputs sat in one Postgres volume with no dump (the box's `crown-jewels` backup does not cover it). Added `relay-db-backup.sh` — restorable `pg_dump` every 6h, 14 kept; verified a 280 KB dump with real rows.
 - **Monitoring/alerting.** `relay-uptime-check.sh` pings `board.naples.agency` every 5 min and Telegram-alerts on any up↔down transition.
 - **Unbounded spend closed.** `/api/run` now has a per-IP rate-limit (5 / 15 min) + a global 6-concurrent-project cap (also shields the pg pool). Tested: 6th call → 429. Plus `process.on(uncaughtException/unhandledRejection)` so crashes exit clean for systemd.
+- **Ingress decoupled.** Relay moved off the shared `anouf-chat` tunnel onto its own supervised `relay-tunnel.service` (tunnel `relay`, UUID `8be3443c-…`); board/api/email CNAMEs re-pointed via the Cloudflare API (the token is embedded in `/root/.cloudflared/cert.pem` — extract its `apiToken` field). Crash-tested: kill → respawn in 2s. The shared tunnel no longer routes them.
 - **DB survives reboot** (policy set) and **infra is documented** (`docs/OPERATIONS.md`, `deploy/`, `AGENTS.md`, `docs/ARCHITECTURE.md`).
 
 ## DEFER (tracked, not yet applied)
@@ -42,15 +43,8 @@ and verified, **DEFER** are real but need load-testing or cross-tenant coordinat
 - **[cross-tenant] Supervise dormant naples upstreams** dash:8090 / gab44:8091 / fleet:8888 / fleet-api:8095 /
   fleet-state:8096 — other projects; the tunnel serves them 502 until each gets its own unit. Coordinate first.
 
-## In progress
-- **Decouple Relay's ingress (single-tunnel SPOF).** A dedicated, supervised `relay-tunnel.service`
-  (tunnel `relay`, UUID `8be3443c-…`) is **built + connected**. The DNS cutover of board/api/email onto it is
-  **blocked**: the box's Cloudflare token is read-only (can't edit DNS), this cloudflared (2026.5.2) won't
-  overwrite an existing tunnel route, and there's no global key. Needs a DNS-edit token or a ~2-min dashboard
-  change (point board/api/email CNAME → `8be3443c-4de2-4d59-85ba-d6e433aff8a3.cfargotunnel.com`). Tailscale
-  Funnel (`anouf.tailbb043c.ts.net` → `:8787`) is a live 2nd path meanwhile.
-
 ## Accepted residual risk
-Until the cutover above, all naples hostnames still ride one tunnel + the Cloudflare edge. The dedicated tunnel
-is a ready warm-standby (flip = one DNS change). The box has no spare public `:80/:443`, so a direct-Caddy
-alternative isn't available without evicting another tenant.
+Relay rides its own dedicated tunnel + the Cloudflare edge. The remaining single point is the Cloudflare edge
+itself (inherent to serving a custom domain through CF); Tailscale Funnel (`anouf.tailbb043c.ts.net` → `:8787`)
+is a live, independent 2nd path to Relay. The box has no spare public `:80/:443`, so a direct-Caddy alternative
+isn't available without evicting another tenant.

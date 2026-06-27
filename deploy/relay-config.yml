@@ -1,0 +1,11 @@
+# Dedicated tunnel for Relay (board/api/email) — decoupled from the shared anouf-chat tunnel.
+tunnel: 8be3443c-4de2-4d59-85ba-d6e433aff8a3
+credentials-file: /root/.cloudflared/8be3443c-4de2-4d59-85ba-d6e433aff8a3.json
+ingress:
+  - hostname: board.naples.agency
+    service: http://127.0.0.1:8787
+  - hostname: api.naples.agency
+    service: http://127.0.0.1:8787
+  - hostname: email.naples.agency
+    service: http://127.0.0.1:8787
+  - service: http_status:404

@@ -335,7 +335,7 @@ function review(){
     { g:'done', sev:'high', t:'No monitoring / alerting', v:'If Relay or the tunnel went down and systemd somehow couldn’t recover it, nobody would know.', fix:'Uptime check every 5 min pings board.naples.agency and Telegram-alerts on any up→down transition. Armed + confirmed.' },
     { g:'done', sev:'high', t:'Unbounded spend on /api/run', v:'The build endpoint was wide open — every brief spends real MiniMax tokens, with no auth and no rate-limit; trivially abusable.', fix:'Per-IP rate-limit (5 briefs / 15 min) + a global cap of 6 concurrent projects (which also shields the pg pool). Tested: 6th call → 429.' },
 
-    { g:'defer', sev:'high', t:'Single ingress for all hostnames', v:'Every naples.agency hostname rides one shared cloudflared tunnel — a single failure domain for Relay and the other tenants. (Your point — correct.)', fix:'A dedicated, supervised relay tunnel is BUILT + connected; the DNS cutover onto it is pending a DNS-edit Cloudflare credential (the box token is read-only). Tailscale Funnel is a live 2nd path meanwhile.' },
+    { g:'done', sev:'high', t:'Single ingress for all hostnames', v:'Every naples.agency hostname rode one shared cloudflared tunnel — a single failure domain for Relay and the other tenants. (Your point — correct.)', fix:'Relay now has its OWN dedicated, supervised tunnel (Restart=always, crash-tested: respawn in 2s). board/api/email re-pointed onto it; the shared tunnel no longer routes them. Fully decoupled.' },
     { g:'defer', sev:'high', t:'Destructive schema bootstrap', v:'db/schema.sql opens with unconditional DROP TABLE … CASCADE and the server never applies it on boot — a fresh DB 500s, and run.ts/demo.ts drop already-shipped work.', fix:'Move to CREATE … IF NOT EXISTS, apply at boot before listen(), gate the reset behind RESET=1, add a numbered migrations/ dir.' },
     { g:'defer', sev:'high', t:'Stub mode still serves', v:'The new boot banner warns, but with no key Relay still serves stub sites that pass every gate.', fix:'Hard-exit in production, or badge the project as “stub” in the UI + KPI so it can never be mistaken for real work.' },
     { g:'defer', sev:'medium', t:'Scheduler pool exhaustion', v:'A global claim() + one runLoop per project, all tagged runnerId=runner-1; three concurrent projects can exhaust the Postgres pool (max 8).', fix:'Partly mitigated now — /api/run caps concurrent projects at 6. Still to do: scope claim/reconcile by project, unique runnerId per loop, size the pool to the loop count.' },
@@ -397,7 +397,7 @@ function docsPage(){
     { t:'Postgres', d:'Docker · unless-stopped', s:'ok' },
     { t:'DB backups', d:'pg_dump every 6h · 14 kept', s:'ok' },
     { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
-    { t:'Dedicated tunnel', d:'built · DNS cutover pending', s:'wip' },
+    { t:'Dedicated tunnel', d:'systemd · own tunnel · board/api/email', s:'ok' },
   ];
   const verify = [
     ['site_renders','headless Chromium screenshot must be non-blank, structural, no external/placeholder assets'],
