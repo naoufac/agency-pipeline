@@ -9,7 +9,7 @@ const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M2 emits <think> tags
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string } };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -23,7 +23,7 @@ const ROLE: Record<string, string> = {
   copywriting: 'You are the Copywriting department. Output ONLY valid JSON mapping section ids to final on-brand copy: {"hero":{"headline":"...","subhead":"...","cta":"..."},"about":{"body":"..."}, ...} with real copy for this brief. JSON only.',
   strategy:    'You are the Strategy department. Give a concrete, brief-specific plan: positioning, the sections the site needs and why, and the single key message. Plain text, specific.',
   auth:        'You are the Auth department. Specify the accounts/authentication model.',
-  build:       'You are the Build department. Upstream you receive brand tokens (JSON: palette hex + fonts), a sitemap (JSON sections) and copy (JSON keyed by section id). Output a COMPLETE, polished, self-contained single-file website as ONE HTML document starting with <!doctype html>. Inline ALL CSS in <style> and any JS in <script> — no external files/frameworks. Use the EXACT palette hex and fonts from the tokens, the section order from the sitemap, and the EXACT copy provided. Do NOT use <img> tags to external files (none exist and they would 404) — create all visuals with CSS gradients, colours, shapes and inline SVG. Make it responsive and genuinely well-designed. Output ONLY raw HTML — no markdown, no fences, no commentary.',
+  build:       'You are the Build department. You build ONE page of a multi-page site (the page is named in "YOU ARE BUILDING THIS PAGE" below). Upstream you receive brand tokens (JSON palette hex + fonts) and copy (JSON). Output a COMPLETE, polished, self-contained HTML document for THIS page only, starting with <!doctype html>, with a shared top navigation linking ALL the listed pages via relative <slug>.html links (highlight the current page). Inline ALL CSS in <style> and any JS in <script> — no external files/frameworks. Use the EXACT palette hex and fonts from the tokens and the real copy. Do NOT use <img> to external files (they 404) — make all visuals with CSS gradients, colours, shapes and inline SVG. Responsive and genuinely well-designed. Output ONLY raw HTML — no markdown, no fences, no commentary.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
 };
@@ -35,6 +35,12 @@ function buildUser(ctx: Ctx): string {
   if (ctx.upstream.length) {
     s += `\nUPSTREAM RESULTS (the departments you depend on):\n`;
     for (const u of ctx.upstream) s += `\n[#${u.seq} ${u.department}]\n${u.content}\n`;
+  }
+  if (ctx.self && ctx.pages && ctx.pages.length) {
+    s += `\nYOU ARE BUILDING THIS PAGE: "${ctx.self.title}" — output the full HTML for ${ctx.self.slug}.html.\n`;
+    s += `Shared top nav must link ALL pages (highlight the current one):\n`;
+    s += ctx.pages.map(p => `  ${p.title} -> ${p.slug}.html`).join('\n') + '\n';
+    s += `Use those exact relative hrefs (home is index.html). Build ONLY this one page.\n`;
   }
   return s;
 }

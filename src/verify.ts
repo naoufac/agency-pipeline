@@ -73,26 +73,27 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
 
   if (rule === 'site_renders') {
     const dir = new URL(task.project_id + '/', SITES);
-    const index = fileURLToPath(new URL('index.html', dir));
-    if (!existsSync(index)) return { ok: false, log: 'no index.html produced' };
-    const size = statSync(index).size;
-    if (size < 400) return { ok: false, log: `index.html too small (${size}b)` };
-    const raw = readFileSync(index, 'utf8');
+    const file = task.artifact || 'index.html';                 // verify THIS page's file (qa -> index.html)
+    const path = fileURLToPath(new URL(file, dir));
+    if (!existsSync(path)) return { ok: false, log: `no ${file} produced` };
+    const size = statSync(path).size;
+    if (size < 400) return { ok: false, log: `${file} too small (${size}b)` };
+    const raw = readFileSync(path, 'utf8');
     const html = raw.toLowerCase();
     if (!/<html|<!doctype/.test(html.slice(0, 400)) || !/<body|<div|<section/.test(html)) return { ok: false, log: 'not valid HTML structure' };
-    // QUALITY GATE: a rendered page that references external assets or has unfilled placeholders is broken
     if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|via\.placeholder/i.test(raw))
       return { ok: false, log: 'broken: external asset reference — build visuals with CSS/SVG, never <img>/url() to external URLs' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };
-    const shot = fileURLToPath(new URL('preview.png', dir));
+    // home page's screenshot becomes the board thumbnail; other pages get a throwaway shot
+    const shot = fileURLToPath(new URL(file === 'index.html' ? 'preview.png' : '_' + file + '.png', dir));
     try {
       execFileSync('chromium-browser', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
         '--hide-scrollbars', '--force-device-scale-factor=1', '--screenshot=' + shot, '--window-size=1280,860',
-        '--virtual-time-budget=7000', 'file://' + index], { timeout: 45000, stdio: 'ignore' });
+        '--virtual-time-budget=7000', 'file://' + path], { timeout: 45000, stdio: 'ignore' });
     } catch {}
-    if (existsSync(shot) && statSync(shot).size > 3000) return { ok: true, log: `renders ok (${size}b html, ${statSync(shot).size}b preview)` };
-    return { ok: false, log: 'render produced a blank/no screenshot' };
+    if (existsSync(shot) && statSync(shot).size > 3000) return { ok: true, log: `${file} renders ok (${size}b, ${statSync(shot).size}b shot)` };
+    return { ok: false, log: `${file}: render produced a blank/no screenshot` };
   }
 
   return { ok: false, log: 'unknown verify rule: ' + rule };

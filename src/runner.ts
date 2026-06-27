@@ -31,7 +31,7 @@ async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[
 }
 
 async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
-  const proj = await pool.query('select brief from projects where id=$1', [task.project_id]);
+  const proj = await pool.query('select brief, params from projects where id=$1', [task.project_id]);
   const ups = await pool.query(
     `select u.seq, u.department, coalesce(o.content,'') as content
      from task_dependencies d join tasks u on u.id=d.upstream_id
@@ -43,7 +43,9 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
     const fb = await pool.query("select detail from run_events where task_id=$1 and type in ('verify_failed','agent_error') order by id desc limit 1", [task.id]);
     if (fb.rows[0]) feedback = fb.rows[0].detail;
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback };
+  const pages = (proj.rows[0].params && proj.rows[0].params.pages) || [];
+  const self = task.artifact ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {

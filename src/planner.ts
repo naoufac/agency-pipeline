@@ -1,114 +1,106 @@
 import pg from 'pg';
 import { llm } from './agents.ts';
 
-// A task in the normalized plan shape used for insertion.
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
+export type Page = { slug: string; title: string };
 
-// Hardcoded FALLBACK graph — used only if the LLM planner is unavailable or returns garbage.
-const FALLBACK: Task[] = [
-  { seq:1, title:'Audience & positioning research', department:'research', verify:'nonempty',     depends_on:[],        artifact:null },
-  { seq:2, title:'Brand system (tokens)',           department:'branding', verify:'contains:#',   depends_on:[1],       artifact:null },
-  { seq:3, title:'Information architecture',         department:'content',  verify:'nonempty',     depends_on:[1],       artifact:null },
-  { seq:4, title:'Copywriting',                      department:'content',  verify:'nonempty',     depends_on:[2,3],     artifact:null },
-  { seq:5, title:'Imagery & art direction',         department:'media',    verify:'nonempty',     depends_on:[2],       artifact:null },
-  { seq:6, title:'Build the website',               department:'build',    verify:'site_renders', depends_on:[2,3,4,5], artifact:'index.html' },
-  { seq:7, title:'QA — acceptance (renders live)',  department:'qa',       verify:'site_renders', depends_on:[6],       artifact:null },
+// Fallback (LLM unavailable): a small multi-page site.
+const FB_THINKING: Task[] = [
+  { seq:1, title:'Audience & positioning research', department:'research', verify:'min:280',   depends_on:[],    artifact:null },
+  { seq:2, title:'Brand system (tokens)',           department:'branding', verify:'wcag',       depends_on:[1],   artifact:null },
+  { seq:3, title:'Information architecture',         department:'content',  verify:'json',       depends_on:[1],   artifact:null },
+  { seq:4, title:'Copywriting',                      department:'content',  verify:'json',       depends_on:[2,3], artifact:null },
 ];
+const FB_PAGES: Page[] = [{ slug:'index', title:'Home' }, { slug:'about', title:'About' }, { slug:'contact', title:'Contact' }];
 
-const PLANNER_SYS = `You are the Planner for an automated agency that ships a real, single-file website for ANY brief.
-Given the brief, output the tasks an agency would run, in dependency order, ending in a build step that produces the actual website.
-
-Output ONLY JSON (no prose, no markdown fences):
-{"tasks":[{"seq":1,"title":"...","department":"research","verify":"nonempty","depends_on":[]}, ...]}
+const PLANNER_SYS = `You are the Planner for an automated agency that ships a real MULTI-PAGE website for ANY brief.
+Output ONLY JSON (no prose, no fences):
+{"pages":[{"slug":"index","title":"Home"},{"slug":"about","title":"About"}, ...],
+ "tasks":[{"seq":1,"title":"...","department":"research","depends_on":[]}, ...]}
 
 Rules:
-- 5 to 9 tasks. seq is 1..N in dependency order; depends_on may reference ONLY earlier seq numbers.
-- ADAPT the upstream tasks to THIS specific brief — a pricing page, a portfolio, a docs site, an event page, a restaurant menu each need different research, sections and copy. Make titles concrete to the brief.
-- Allowed departments: research, strategy, branding, content, copywriting, media, design, seo, build, qa (or a short lowercase word).
-- The plan MUST end with exactly one task {"department":"build","verify":"site_renders","artifact":"index.html"} that depends on the brand + content + structure tasks. You MAY add a final {"department":"qa","verify":"site_renders"} acceptance task after it.
-- verify must be one of: "nonempty" (thinking/spec steps), "contains:<word>" (when a specific token must appear), "site_renders" (ONLY for build/qa).
-- Keep it lean and real. JSON only.`;
+- "pages": 2 to 5 pages tailored to the brief. The FIRST page MUST be {"slug":"index","title":"Home"}. Slugs are lowercase, url-safe, no extension (e.g. "about","services","menu","contact","pricing").
+- "tasks": 4 to 7 THINKING steps only (research, strategy, branding, content/IA, copywriting, media, design) in dependency order; depends_on references only earlier seq. Do NOT include build or QA tasks — those are added automatically, one build per page.
+- Adapt pages + tasks to THIS brief (a restaurant: Home/Menu/About/Contact; a SaaS: Home/Features/Pricing/Docs; a portfolio: Home/Work/About/Contact).
+- Keep titles concrete. JSON only.`;
 
-function validate(plan: any): Task[] | null {
-  if (!plan || !Array.isArray(plan.tasks) || !plan.tasks.length) return null;
-  const ok = (v: any) => typeof v === 'string' && (['nonempty','site_renders','sql_applies'].includes(v) || /^contains:.+/.test(v));
-  let tasks: Task[] = plan.tasks.slice(0, 14).map((t: any, i: number) => ({
+const slugify = (s: string) => String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24) || 'page';
+
+function normPages(arr: any): Page[] {
+  let pages: Page[] = Array.isArray(arr) ? arr.slice(0, 5).map((p: any) => ({ slug: slugify(p.slug || p.title), title: String(p.title || p.slug || 'Page').slice(0, 40) })) : [];
+  pages = pages.filter((p, i, a) => p.slug && a.findIndex(x => x.slug === p.slug) === i);
+  if (!pages.length) pages = [{ slug: 'index', title: 'Home' }];
+  if (pages[0].slug !== 'index') { pages = pages.filter(p => p.slug !== 'index'); pages.unshift({ slug: 'index', title: 'Home' }); }
+  return pages.slice(0, 5);
+}
+
+function validate(plan: any): { tasks: Task[]; pages: Page[] } | null {
+  const list = Array.isArray(plan?.tasks) ? plan.tasks : null;
+  if (!list || !list.length) return null;
+  const pages = normPages(plan.pages);
+
+  // thinking tasks only (drop any build/qa the LLM emitted)
+  let tasks: Task[] = list.map((t: any, i: number) => ({
     seq: Number.isFinite(+t.seq) ? +t.seq : i + 1,
     title: String(t.title || `Step ${i + 1}`).slice(0, 90),
     department: (String(t.department || 'work').toLowerCase().replace(/[^a-z0-9_]/g, '') || 'work').slice(0, 20),
-    verify: ok(t.verify) ? t.verify : 'nonempty',
-    depends_on: Array.isArray(t.depends_on) ? t.depends_on.map(Number).filter(Number.isFinite) : [],
-    artifact: t.artifact === 'index.html' ? 'index.html' : null,
-  }));
-  // renumber 1..N in given order, remap deps, keep only backward edges (guarantees acyclic)
+    verify: 'nonempty', depends_on: Array.isArray(t.depends_on) ? t.depends_on.map(Number).filter(Number.isFinite) : [], artifact: null,
+  })).filter((t: Task) => !['build', 'qa'].includes(t.department));
+  if (tasks.length < 2) return null;
   tasks.sort((a, b) => a.seq - b.seq);
-  const remap: Record<number, number> = {}; tasks.forEach((t, i) => (remap[t.seq] = i + 1));
-  tasks.forEach(t => { const ns = remap[t.seq]; t.depends_on = [...new Set(t.depends_on.map(d => remap[d]).filter(d => d && d < ns))]; t.seq = ns; });
-  tasks.forEach(t => { if (t.verify === 'site_renders' && !['build','qa'].includes(t.department)) t.verify = 'nonempty'; });
-  // collapse to ONE real deliverable build = the last build step; earlier 'build' steps become design specs
-  const builds = tasks.filter(t => t.department === 'build');
-  let build: Task;
-  if (builds.length) {
-    build = builds[builds.length - 1];
-    builds.slice(0, -1).forEach(b => { b.department = 'design'; b.verify = 'nonempty'; b.artifact = null; });
-  } else {
-    build = { seq: tasks.length + 1, title: 'Build the website', department: 'build', verify: 'site_renders', artifact: 'index.html', depends_on: [] };
-    tasks.push(build);
-  }
-  build.department = 'build'; build.verify = 'site_renders'; build.artifact = 'index.html';
-  // the build fans in from EVERY prior non-QA step so it has full context (brand, copy, design)
-  build.depends_on = tasks.filter(t => t.seq < build.seq && t.department !== 'qa').map(t => t.seq);
-  // QA acceptance re-renders the finished site
-  tasks.filter(t => t.department === 'qa').forEach(q => { q.verify = 'site_renders'; q.artifact = null; if (!q.depends_on.includes(build.seq)) q.depends_on = [build.seq]; });
-  // guarantee ONE canonical brand-tokens task so the wcag gate ALWAYS binds (not name-dependent):
-  // promote the first brand/design/visual task (or any middle task) to department 'branding'.
+  const rm: Record<number, number> = {}; tasks.forEach((t, i) => (rm[t.seq] = i + 1));
+  tasks.forEach(t => { const ns = rm[t.seq]; t.depends_on = [...new Set(t.depends_on.map(d => rm[d]).filter(d => d && d < ns))]; t.seq = ns; });
+
+  // one canonical brand task -> wcag; copy/content -> json; rest -> length floor
   let bi = tasks.findIndex(t => /brand/.test(t.department));
   if (bi < 0) bi = tasks.findIndex(t => /design|visual|look|style|art|theme|colou?r/.test(t.department));
-  if (bi < 0) bi = tasks.findIndex(t => !['research', 'strategy', 'build', 'qa'].includes(t.department));
+  if (bi < 0) bi = tasks.findIndex(t => !['research', 'strategy'].includes(t.department));
   if (bi >= 0) tasks[bi].department = 'branding';
-  // deterministic per-department checks (guarantee honest rigor regardless of what the LLM chose)
-  for (const t of tasks) {
-    if (t.department === 'build' || t.department === 'qa') continue;
-    if (t.department === 'branding') t.verify = 'wcag';                 // JSON tokens, AA-verified text/bg
-    else if (/copy|content|writ/.test(t.department)) t.verify = 'json'; // sitemap / copy as valid JSON
-    else t.verify = 'min:280';                                         // research/strategy/design/media: length floor
-  }
-  if (tasks.length < 2) return null;
-  return tasks;
+  for (const t of tasks) t.verify = t.department === 'branding' ? 'wcag' : (/copy|content|writ/.test(t.department) ? 'json' : 'min:280');
+
+  // one render-verified BUILD task per page (fans in from every thinking step), then a QA pass on Home
+  const thinkSeqs = tasks.map(t => t.seq);
+  let seq = tasks.length;
+  const pageBuilds: Task[] = pages.map(pg => ({ seq: ++seq, title: `Build the ${pg.title} page`, department: 'build', verify: 'site_renders', depends_on: thinkSeqs, artifact: `${pg.slug}.html` }));
+  const indexBuild = pageBuilds[0];
+  const qa: Task = { seq: ++seq, title: 'QA — acceptance (renders live)', department: 'qa', verify: 'site_renders', depends_on: [indexBuild.seq], artifact: null };
+  return { tasks: [...tasks, ...pageBuilds, qa], pages };
 }
 
-async function llmPlan(brief: string): Promise<Task[] | null> {
-  let raw = '';
-  try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 2000); } catch { return null; }
+async function llmPlan(brief: string): Promise<{ tasks: Task[]; pages: Page[] } | null> {
+  let raw = ''; try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 2000); } catch { return null; }
   if (!raw.trim()) return null;
   const txt = raw.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
-  const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
-  if (s < 0 || e <= s) return null;
+  const s = txt.indexOf('{'), e = txt.lastIndexOf('}'); if (s < 0 || e <= s) return null;
   let parsed: any; try { parsed = JSON.parse(txt.slice(s, e + 1)); } catch { return null; }
   try { return validate(parsed); } catch { return null; }
 }
 
 export async function plan(pool: pg.Pool, brief: string): Promise<string> {
-  const tasks = (await llmPlan(brief)) || FALLBACK;
-  const usedLLM = tasks !== FALLBACK;
-  const params = { planner: usedLLM ? 'llm' : 'template', assumptions: ['format=single-page site'] };
+  const result = (await llmPlan(brief)) || { tasks: [...FB_THINKING, ...buildsFor(FB_PAGES, FB_THINKING.length)], pages: FB_PAGES };
+  const usedLLM = result.pages !== FB_PAGES;
+  const { tasks, pages } = result;
+  const params = { planner: usedLLM ? 'llm' : 'template', pages };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
-
   const seqToId: Record<number, string> = {};
   for (const t of tasks) {
-    const r = await pool.query(
-      'insert into tasks(project_id, seq, title, department, verify, artifact) values ($1,$2,$3,$4,$5,$6) returning id',
+    const r = await pool.query('insert into tasks(project_id, seq, title, department, verify, artifact) values ($1,$2,$3,$4,$5,$6) returning id',
       [projectId, t.seq, t.title, t.department, t.verify, t.artifact]);
     seqToId[t.seq] = r.rows[0].id;
   }
   for (const t of tasks) for (const d of t.depends_on)
     if (seqToId[d]) await pool.query('insert into task_dependencies(upstream_id, downstream_id) values ($1,$2) on conflict do nothing', [seqToId[d], seqToId[t.seq]]);
-
-  await pool.query(
-    `update tasks set status='ready' where project_id=$1 and status='blocked'
-       and not exists (select 1 from task_dependencies d where d.downstream_id = tasks.id)`, [projectId]);
-  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${usedLLM ? 'LLM planner' : 'template fallback'}`]);
+  await pool.query(`update tasks set status='ready' where project_id=$1 and status='blocked' and not exists (select 1 from task_dependencies d where d.downstream_id = tasks.id)`, [projectId]);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${usedLLM ? 'LLM planner' : 'template'}`]);
   return projectId;
+}
+
+function buildsFor(pages: Page[], startSeq: number): Task[] {
+  const think = Array.from({ length: startSeq }, (_, i) => i + 1);
+  let seq = startSeq;
+  const builds: Task[] = pages.map(pg => ({ seq: ++seq, title: `Build the ${pg.title} page`, department: 'build', verify: 'site_renders', depends_on: think, artifact: `${pg.slug}.html` }));
+  builds.push({ seq: ++seq, title: 'QA — acceptance', department: 'qa', verify: 'site_renders', depends_on: [builds[0].seq], artifact: null });
+  return builds;
 }
