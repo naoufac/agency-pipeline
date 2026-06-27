@@ -16,10 +16,14 @@ export async function verify(pool: pg.Pool, rule: string, content: string): Prom
     return { ok, log: ok ? `contains "${needle}"` : `missing "${needle}"` };
   }
   if (rule === 'sql_applies') {
+    // tolerate LLM formatting: strip markdown fences, start at the first CREATE TABLE
+    let sql = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
+    const at = sql.search(/create\s+table/i);
+    if (at >= 0) sql = sql.slice(at);
     const c = await pool.connect();
     try {
       await c.query('begin');
-      await c.query(content);     // really runs the DDL on Postgres...
+      await c.query(sql);         // really runs the DDL on Postgres...
       await c.query('rollback');  // ...then throws it away. Pass = it applied with no error.
       return { ok: true, log: 'sql applied cleanly (tx rolled back)' };
     } catch (e: any) {
