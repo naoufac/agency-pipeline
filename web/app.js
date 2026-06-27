@@ -282,8 +282,8 @@ function roadmap(){
     { n:'03', t:'Generic + multi-page', s:'done', d:'An LLM planner that writes a bespoke task graph per brief, producing real multi-page sites with a shared navigation.' },
     { n:'04', t:'Design excellence', s:'done', d:'Tailwind compiled & inlined per page, real fonts shipped inline — modern 2024 output, not 1998 HTML.' },
     { n:'05', t:'Built to last', s:'done', d:'Every piece supervised by systemd (Restart=always): Relay, the Cloudflare tunnel and Postgres survive any crash or reboot — proven by kill-tests. Plus a full doc set and a live Review page so the work stays visible, not buried in files.' },
-    { n:'06', t:'Real media', s:'progress', d:'Existing photography & video (Pexels) searched per section, downloaded into the site and served locally — gate-safe, never a broken link.' },
-    { n:'07', t:'Email platform', s:'progress', d:'The EmailDelivery ESP on email.naples.agency — campaigns, automations, segments, relay-based sending.' },
+    { n:'06', t:'Real media', s:'done', d:'The build agent names the photos each section needs; Relay pulls real licensed Pexels images, downloads them into the site and serves them locally — gate-safe, never a broken link. Verified on a live build.' },
+    { n:'07', t:'Email platform', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP through the domain mail server, SPF/DKIM/DMARC aligned (inbox-grade), wired into Relay as a reusable mailer. Verified: live delivery to a real inbox.' },
     { n:'08', t:'Editable CMS', s:'next', d:'Pages & blocks in Postgres; edit content and re-publish a single page through the same verified build path.' },
     { n:'09', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
   ];

@@ -5,6 +5,7 @@ import { ev, counts } from './db.ts';
 import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import { applyExcellence } from './excellence.ts';
+import { processMedia } from './media.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,8 +64,10 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       mkdirSync(fileURLToPath(dir), { recursive: true });
       let body = content.replace(/^\s*```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '');
       const at = body.search(/<!doctype html|<html/i); if (at > 0) body = body.slice(at);
+      body = await processMedia(body, dir);   // fill <img data-q="..."> with real local Pexels photos
       // deterministic safety net: a website must never ship broken external/placeholder images
       body = body
+        .replace(/<script\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[\s\S]*?<\/script>/gi, '')   // strip external scripts (e.g. tailwind CDN) — we compile+inline
         .replace(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
         .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
         .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)")
