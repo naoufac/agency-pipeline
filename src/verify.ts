@@ -81,8 +81,8 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     const raw = readFileSync(path, 'utf8');
     const html = raw.toLowerCase();
     if (!/<html|<!doctype/.test(html.slice(0, 400)) || !/<body|<div|<section/.test(html)) return { ok: false, log: 'not valid HTML structure' };
-    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|via\.placeholder/i.test(raw))
-      return { ok: false, log: 'broken: external asset reference — build visuals with CSS/SVG, never <img>/url() to external URLs' };
+    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(raw))
+      return { ok: false, log: 'broken: external/unbundled asset reference — all CSS/fonts must be inlined' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };
     // home page's screenshot becomes the board thumbnail; other pages get a throwaway shot

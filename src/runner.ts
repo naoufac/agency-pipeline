@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
 import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
+import { applyExcellence } from './excellence.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -68,6 +69,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
         .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)")
         .replace(/url\(\s*["']?[^)]*placeholder[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)");
+      body = applyExcellence(body);   // compile Tailwind + inline real fonts -> modern, self-contained
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
     }
 

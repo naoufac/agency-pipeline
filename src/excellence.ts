@@ -1,0 +1,45 @@
+// Excellence layer: compile Tailwind (vendored standalone binary) against a page and inline the
+// result + real base64 fonts, producing one self-contained, gate-safe, modern HTML file.
+import { execFileSync } from 'node:child_process';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { FONT_FACES } from './fonts.ts';
+
+const TW = fileURLToPath(new URL('../tools/tailwindcss', import.meta.url));
+
+// appended to the Tailwind input: real inline fonts + a tasteful base layer
+const BASE_CSS = FONT_FACES + `
+:root{ --font-display:"Grotesk"; --font-body:"Inter"; }
+html{ scroll-behavior:smooth; }
+body{ font-family:var(--font-body),system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+h1,h2,h3,h4,.font-display{ font-family:var(--font-display),system-ui,sans-serif; letter-spacing:-0.02em; }
+.font-serif-display{ font-family:"Fraunces",Georgia,serif; letter-spacing:-0.01em; }
+`;
+
+export function tailwindAvailable(): boolean { return existsSync(TW); }
+
+// Returns the page with compiled Tailwind + inline fonts injected. Never throws — on any
+// failure it returns the input unchanged so a build is never broken by the excellence step.
+export function applyExcellence(html: string): string {
+  if (!existsSync(TW)) return html;
+  let dir: string | null = null;
+  try {
+    dir = mkdtempSync(join(tmpdir(), 'relay-tw-'));
+    writeFileSync(join(dir, 'page.html'), html);
+    writeFileSync(join(dir, 'in.css'), '@import "tailwindcss";\n' + BASE_CSS);
+    execFileSync(TW, ['-i', join(dir, 'in.css'), '-o', join(dir, 'out.css'), '--content', join(dir, 'page.html'), '--minify'],
+      { timeout: 30000, stdio: 'ignore' });
+    let css = readFileSync(join(dir, 'out.css'), 'utf8');
+    css = css.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim();           // strip leading license comment (contains a URL)
+    if (!css) return html;
+    const style = `<style>${css}</style>`;
+    // drop any stylesheet <link> / app.css the agent may have added; inline our compiled CSS instead
+    let out = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, '').replace(/<link\b[^>]*app\.css[^>]*>/gi, '');
+    if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + '</head>');
+    if (/<body[^>]*>/i.test(out)) return out.replace(/(<body[^>]*>)/i, '$1' + style);
+    return style + out;
+  } catch { return html; }
+  finally { if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch {} } }
+}
