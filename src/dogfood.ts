@@ -103,9 +103,13 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl = 'h
   try {
     const { issues, checked } = await dogfood(pool, projectId, baseUrl);
     const high = issues.filter(i => i.severity === 'high').length;
-    const detail = issues.length
+    const summary = issues.length
       ? `${issues.length} issue(s), ${high} high — ` + issues.slice(0, 8).map(i => `${i.page}/${i.viewport}:${i.kind}`).join('; ')
       : `clean — ${checked.buttons} buttons go somewhere, ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, header aligned`;
-    await ev(pool, projectId, null, 'dogfood', detail);
+    // create-if-not-exists so it also works on the already-running prod DB (applySchema isn't re-run there)
+    await pool.query(`create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())`).catch(() => {});
+    await pool.query('insert into dogfood_reviews(project_id, passed, summary, issues, checked) values ($1,$2,$3,$4,$5)',
+      [projectId, high === 0, summary, JSON.stringify(issues), JSON.stringify(checked)]);
+    await ev(pool, projectId, null, 'dogfood', summary);
   } catch (e: any) { await ev(pool, projectId, null, 'dogfood', 'reviewer error: ' + (e?.message ?? e)).catch(() => {}); }
 }

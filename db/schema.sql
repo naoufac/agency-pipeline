@@ -148,3 +148,15 @@ create table if not exists site_submissions (
   created_at  timestamptz not null default now()
 );
 create index if not exists site_submissions_proj on site_submissions(project_id, created_at desc);
+
+-- interaction review (dogfood): a real browser used the site — structured issues + verdict, per project
+create table if not exists dogfood_reviews (
+  id          bigserial primary key,
+  project_id  uuid,
+  passed      boolean not null default false,
+  summary     text,
+  issues      jsonb not null default '[]'::jsonb,
+  checked     jsonb not null default '{}'::jsonb,
+  at          timestamptz not null default now()
+);
+create index if not exists dogfood_reviews_proj on dogfood_reviews(project_id, at desc);

@@ -312,7 +312,21 @@ function project(id, tab, seq){
   async function qaTab(){
     const tone = s => s >= 8 ? 'good' : s >= 5 ? 'warn' : 'bad';
     const body = document.getElementById('pbody');
-    body.innerHTML = `<div class="qa-head"><p class="muted" style="margin:4px 0 0;flex:1;min-width:200px">Relay screenshots every page at phone + desktop and a vision model reads them for real problems. Lower score = more issues.</p><button class="btn btn-sm" id="qarun">Re-run review</button></div><div id="qabody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    body.innerHTML = `
+      <h2 class="rv-h" style="margin-top:0">Interaction review <span class="muted" style="font-size:13px;font-weight:400">— a real browser clicked every button, typed into &amp; submitted the form, and checked the data came through</span></h2>
+      <div id="dogfood"><div class="muted" style="padding:12px 2px">Loading…</div></div>
+      <h2 class="rv-h">Visual review <span class="muted" style="font-size:13px;font-weight:400">— a vision model read every page on phone + desktop</span></h2>
+      <div class="qa-head"><p class="muted" style="margin:4px 0 0;flex:1;min-width:200px">Lower score = more issues.</p><button class="btn btn-sm" id="qarun">Re-run visual review</button></div>
+      <div id="qabody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    async function renderDog(){
+      let d; try { d = await j('/api/dogfood?id=' + id); } catch { return; }
+      const el = document.getElementById('dogfood'); if (!el) return;
+      if (!d || d.summary == null) { el.innerHTML = `<div class="empty">No interaction review yet — it runs automatically when the build finishes.</div>`; return; }
+      const issues = d.issues || [], highs = issues.filter(i => i.severity === 'high').length;
+      el.innerHTML = `<div class="qa-overall tone-${d.passed ? 'good' : 'bad'}"><b>${d.passed ? '✓ Passed' : '✗ ' + highs + ' blocking'}</b><span class="muted" style="margin-left:10px">${esc(d.summary)}</span></div>`
+        + (issues.length ? `<div class="rv-list" style="margin-top:12px">${issues.map(i => `<div class="card rv-card"><div class="row" style="justify-content:space-between;gap:10px"><span class="pill">${esc(i.page)} · ${esc(i.viewport)}</span><span class="sev sev-${i.severity === 'high' ? 'high' : 'medium'}">${esc(i.kind)}</span></div><p class="muted" style="margin-top:8px">${esc(i.detail)}</p></div>`).join('')}</div>` : '');
+    }
+    renderDog();
     async function render(){
       let d; try { d = await j('/api/qa?id=' + id); } catch { return 0; }
       const el = document.getElementById('qabody'); if (!el) return 0;
@@ -338,7 +352,21 @@ function project(id, tab, seq){
   // ---- Data tab: form submissions stored in Postgres (the full-stack layer) ----
   async function dataTab(){
     const body = document.getElementById('pbody');
-    body.innerHTML = `<p class="muted" style="margin:4px 0 14px">Form submissions captured by this site, stored in Postgres — this site has a real backend, not just static pages.</p><div id="databody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    body.innerHTML = `
+      <h2 class="rv-h" style="margin-top:0">Data model <span class="muted" style="font-size:13px;font-weight:400">— the database the agency designed &amp; provisioned for this app</span></h2>
+      <div id="schemabody"><div class="muted" style="padding:12px 2px">Loading…</div></div>
+      <h2 class="rv-h">Submissions <span class="muted" style="font-size:13px;font-weight:400">— captured live by this site’s forms, stored in Postgres</span></h2>
+      <div id="databody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    // the live data model (introspected from the project's own isolated schema)
+    let s; try { s = await j('/api/schema?id=' + id); } catch {}
+    const sb = document.getElementById('schemabody');
+    if (sb) sb.innerHTML = (!s || !s.tables || !s.tables.length)
+      ? `<div class="empty">No database — this is a presentation site (no app data model).</div>`
+      : `<div class="rv-list">${s.tables.map(t => `<div class="card rv-card">
+          <div class="row" style="justify-content:space-between"><code>${esc(t.table)}</code><span class="pill">${t.rows} row${t.rows === 1 ? '' : 's'}</span></div>
+          <div style="margin-top:10px;display:grid;gap:4px;font-size:13px">${(t.columns || []).map(c => `<div><b style="color:var(--text);font-weight:600">${esc(c.name)}</b> <span class="muted">${esc(c.type)}${c.nullable ? '' : ' · required'}</span></div>`).join('')}</div>
+          ${(t.relations && t.relations.length) ? `<p class="muted" style="margin-top:8px;font-size:12px">→ ${t.relations.map(r => esc(r.column) + ' → ' + esc(r.references)).join(', ')}</p>` : ''}
+        </div>`).join('')}</div>`;
     let d; try { d = await j('/api/submissions?id=' + id); } catch { document.getElementById('databody').innerHTML = '<div class="empty">Couldn’t load submissions.</div>'; return; }
     const el = document.getElementById('databody');
     if (!d.submissions || !d.submissions.length) { el.innerHTML = `<div class="empty">No submissions yet. When someone fills in a form on this site, it lands here.</div>`; return; }

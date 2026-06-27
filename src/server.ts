@@ -215,8 +215,10 @@ const server = http.createServer(async (req, res) => {
     // ---- Interaction QA (dogfood): a real browser used the site; latest verdict ----
     if (path === '/api/dogfood') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
-      const r = await pool.query("select detail, at as created_at from run_events where project_id=$1 and type='dogfood' order by id desc limit 1", [id]);
-      return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || { detail: null }));
+      try {
+        const r = await pool.query('select passed, summary, issues, checked, at from dogfood_reviews where project_id=$1 order by id desc limit 1', [id]);
+        return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || { summary: null, issues: [], checked: {} }));
+      } catch { return send(res, 200, 'application/json', '{"summary":null,"issues":[],"checked":{}}'); }
     }
     // ---- The data model the agency designed for this project (live introspection) ----
     if (path === '/api/schema') {
