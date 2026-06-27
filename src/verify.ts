@@ -1,5 +1,7 @@
 import pg from 'pg';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileP = promisify(execFile);
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -88,9 +90,9 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // home page's screenshot becomes the board thumbnail; other pages get a throwaway shot
     const shot = fileURLToPath(new URL(file === 'index.html' ? 'preview.png' : '_' + file + '.png', dir));
     try {
-      execFileSync('chromium-browser', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+      await execFileP('chromium-browser', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
         '--hide-scrollbars', '--force-device-scale-factor=1', '--screenshot=' + shot, '--window-size=1280,860',
-        '--virtual-time-budget=7000', 'file://' + path], { timeout: 45000, stdio: 'ignore' });
+        '--virtual-time-budget=7000', 'file://' + path], { timeout: 45000, killSignal: 'SIGKILL' });
     } catch {}
     if (existsSync(shot) && statSync(shot).size > 3000) return { ok: true, log: `${file} renders ok (${size}b, ${statSync(shot).size}b shot)` };
     return { ok: false, log: `${file}: render produced a blank/no screenshot` };

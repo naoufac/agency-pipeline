@@ -9,7 +9,7 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { republishPage } from './cms.ts';
-import { reviewSite } from './qa.ts';
+import { reviewSite, qaRunning } from './qa.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -29,8 +29,10 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   if (arr.length >= max) { map.set(ip, arr); return true; }
   arr.push(now); map.set(ip, arr); return false;
 }
+const QA_HITS = new Map<string, number[]>();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 const publishLimited = (ip: string) => limited(PUB_HITS, PUB_MAX_PER_IP, ip); // /api/page/publish: cheap + frequent during editing
+const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {
@@ -170,16 +172,20 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/qa') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
       const r = await pool.query('select slug, viewport, score, issues, shot from qa_reviews where project_id=$1 order by slug, viewport', [id]);
-      const scores = r.rows.map((x: any) => x.score).filter((s: number) => s > 0);
+      const scores = r.rows.map((x: any) => x.score);
       const overall = scores.length ? Math.min(...scores) : null;
-      return send(res, 200, 'application/json', JSON.stringify({ overall, reviews: r.rows }));
+      return send(res, 200, 'application/json', JSON.stringify({ overall, running: qaRunning(id), reviews: r.rows }));
     }
     if (path === '/api/qa/run' && req.method === 'POST') {
       let raw = ''; for await (const c of req) raw += c;
       let id = ''; try { id = (JSON.parse(raw || '{}').id || '').trim(); } catch {}
       if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
       const ip = String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?').split(',')[0].trim();
-      if (publishLimited(ip)) return send(res, 429, 'application/json', '{"error":"slow down"}');
+      if (qaLimited(ip)) return send(res, 429, 'application/json', '{"error":"slow down"}');
+      const pr = (await pool.query('select status from projects where id=$1', [id])).rows[0];
+      if (!pr) return send(res, 404, 'application/json', '{"error":"project not found"}');
+      if (pr.status !== 'done') return send(res, 409, 'application/json', '{"error":"site is still building"}');
+      if (qaRunning(id)) return send(res, 200, 'application/json', '{"ok":true,"state":"running"}');   // already reviewing
       reviewSite(pool, id).catch((e) => console.error('qa run', id, e?.message));   // fire-and-forget; polled via /api/qa
       return send(res, 202, 'application/json', '{"ok":true}');
     }

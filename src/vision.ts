@@ -17,11 +17,11 @@ function firstJson(s: string): any {
   return null;
 }
 
-export interface Critique { score: number; issues: string[]; }
+export interface Critique { score: number | null; issues: string[]; }   // score null = unparseable (don't store)
 
-// Read a screenshot and return {score 1-10, issues[]}. Throws on API error (caller tolerates).
+// Read a screenshot and return {score 1-10 (or null), issues[]}. Throws on API error (caller tolerates).
 export async function critique(pngPath: string, label: string): Promise<Critique> {
-  if (!KEY) return { score: 0, issues: ['vision disabled (set GEMINI_API_KEY)'] };
+  if (!KEY) return { score: null, issues: [] };
   const img = readFileSync(pngPath).toString('base64');
   const prompt =
     `You are a meticulous senior product designer reviewing a ${label} screenshot of a website page. ` +
@@ -41,7 +41,8 @@ export async function critique(pngPath: string, label: string): Promise<Critique
   const data: any = await res.json();
   const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const j = firstJson(txt) || {};
-  const score = Math.max(0, Math.min(10, Math.round(Number(j.score) || 0)));
+  const n = Number(j.score);
+  const score = Number.isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : null;
   const issues = Array.isArray(j.issues) ? j.issues.slice(0, 6).map((x: any) => String(x)) : [];
   return { score, issues };
 }

@@ -29,21 +29,31 @@ html,body{ overflow-x:hidden; }
 }
 `;
 
-// Deterministic mobile hamburger: tag the nav's link list + inject a toggle button. Never throws.
-// (If the nav has no <ul>, the flex-wrap safety net above still prevents overflow.)
-function navMobilify(html: string): string {
+// Deterministic mobile hamburger: find the nav/header whose <ul> is a real LINK list, tag it
+// .relay-navlinks and inject a ☰ toggle. Splices by index (never String.replace, whose $-patterns
+// would corrupt copy containing '$'). Iterates candidates so a logo-only header or nested <header>
+// doesn't defeat it. If nothing qualifies, the flex-wrap safety net still prevents overflow. Never throws.
+const BURGER = `<button class="relay-burger" aria-label="Menu" onclick="this.closest('nav,header').classList.toggle('relay-open')">☰</button>`;
+export function navMobilify(html: string): string {
   try {
-    const m = html.match(/<(nav|header)\b[\s\S]*?<\/\1>/i);
-    if (!m || /relay-burger/.test(m[0])) return html;
-    let nav = m[0];
-    if (!/<ul\b/i.test(nav)) return html;                       // no link list -> rely on flex-wrap
-    nav = nav.replace(/<ul\b([^>]*)>/i, (um, attrs) =>
-      /class\s*=\s*["']/i.test(attrs)
-        ? um.replace(/class\s*=\s*(["'])/i, 'class=$1relay-navlinks ')
-        : `<ul class="relay-navlinks"${attrs}>`);
-    nav = nav.replace(/(<ul\b[^>]*relay-navlinks)/i,
-      `<button class="relay-burger" aria-label="Menu" onclick="this.closest('nav,header').classList.toggle('relay-open')">☰</button>$1`);
-    return html.replace(m[0], nav);
+    if (/relay-burger/.test(html)) return html;                 // idempotent
+    const navRe = /<(nav|header)\b[\s\S]*?<\/\1>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = navRe.exec(html))) {
+      const block = m[0];
+      const ulRe = /<ul\b([^>]*)>([\s\S]*?)<\/ul>/gi;
+      let u: RegExpExecArray | null;
+      while ((u = ulRe.exec(block))) {
+        if (!/<a\b[^>]*href/i.test(u[2])) continue;             // not a link list (skip cart/social/footer <ul>)
+        const ulTag = u[0], attrs = u[1];
+        const taggedUl = /class\s*=\s*["']/i.test(attrs)
+          ? `<ul${attrs.replace(/class\s*=\s*(["'])/i, 'class=$1relay-navlinks ')}>${u[2]}</ul>`
+          : `<ul class="relay-navlinks"${attrs}>${u[2]}</ul>`;
+        const newBlock = block.slice(0, u.index) + BURGER + taggedUl + block.slice(u.index + ulTag.length);
+        return html.slice(0, m.index) + newBlock + html.slice(m.index + block.length);   // literal splice — no $-scan
+      }
+    }
+    return html;
   } catch { return html; }
 }
 

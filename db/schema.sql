@@ -139,3 +139,4 @@ create table if not exists qa_reviews (
   created_at  timestamptz not null default now()
 );
 create index if not exists qa_reviews_proj_ix on qa_reviews(project_id);
+create unique index if not exists qa_reviews_uk on qa_reviews(project_id,slug,viewport);
