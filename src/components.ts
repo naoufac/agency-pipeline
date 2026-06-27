@@ -21,7 +21,7 @@ p{margin:0 0 1rem}
 .btn:hover{filter:brightness(1.07)}
 /* nav — CSS-only hamburger via checkbox */
 .nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(10px);border-bottom:var(--border-w,1px) solid var(--line)}
-.nav-inner{display:flex;align-items:center;gap:20px;max-width:1140px;margin:0 auto;padding:14px 24px;position:relative}
+.nav-inner{display:flex;align-items:center;gap:20px;max-width:var(--container,1140px);margin:0 auto;padding:14px 24px;position:relative}
 .nav-brand{font-family:var(--font-display);font-weight:700;font-size:1.3rem;text-decoration:none;color:var(--text)}
 .nav-links{display:flex;align-items:center;gap:4px;margin-left:auto;list-style:none;padding:0;margin-top:0;margin-bottom:0}
 .nav-links a{text-decoration:none;color:var(--muted);font-weight:500;font-size:.95rem;padding:.45rem .75rem;border-radius:8px}
@@ -78,13 +78,13 @@ p{margin:0 0 1rem}
 .t-editorial .hero-inner,.t-minimal .hero-inner{max-width:840px}
 `;
 
-export function navBar(brand: string, pages: any[], current: string, ctaText?: string) {
+export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#') {
   const links = pages.map(p => `<li><a href="${esc(p.slug)}.html"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a></li>`).join('');
   return `<nav class="nav"><div class="nav-inner">
   <a class="nav-brand" href="index.html">${esc(brand)}</a>
   <input type="checkbox" id="navmenu" class="nav-toggle" aria-hidden="true">
   <label for="navmenu" class="nav-burger" aria-label="Toggle menu">☰</label>
-  <ul class="nav-links">${links}${ctaText ? `<li><a class="btn" href="#">${esc(ctaText)}</a></li>` : ''}</ul>
+  <ul class="nav-links">${links}${ctaText ? `<li><a class="btn" href="${esc(ctaHref)}">${esc(ctaText)}</a></li>` : ''}</ul>
 </div></nav>`;
 }
 export function footer(brand: string, pages: any[]) {
@@ -94,24 +94,24 @@ export function footer(brand: string, pages: any[]) {
 }
 
 // section components — each takes a content object, returns perfect HTML
-export const SECTIONS: Record<string, (s: any) => string> = {
-  hero: (s) => `<header class="hero ${s.image ? 'on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
+export const SECTIONS: Record<string, (s: any, o?: { cta?: string }) => string> = {
+  hero: (s, o) => `<header class="hero ${s.image ? 'on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
     <div class="container"><div class="hero-inner">
       ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h1>${esc(s.headline)}</h1>
-      ${s.lead ? `<p class="lead">${esc(s.lead)}</p>` : ''}${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}
+      ${s.lead ? `<p class="lead">${esc(s.lead)}</p>` : ''}${s.cta ? `<a class="btn" href="${esc(o?.cta || '#')}">${esc(s.cta)}</a>` : ''}
     </div></div></header>`,
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>
   </div></section>`,
-  split: (s) => `<section class="section"><div class="container"><div class="split ${s.reverse ? 'rev' : ''}">
+  split: (s, o) => `<section class="section"><div class="container"><div class="split ${s.reverse ? 'rev' : ''}">
     <div class="split-media">${q(s.image || 'abstract brand texture')}</div>
-    <div>${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2><p class="muted">${esc(s.body)}</p>${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}</div>
+    <div>${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2><p class="muted">${esc(s.body)}</p>${s.cta ? `<a class="btn" href="${esc(o?.cta || '#')}">${esc(s.cta)}</a>` : ''}</div>
   </div></div></section>`,
   gallery: (s) => `<section class="section"><div class="container">${s.title ? `<h2 style="margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
     <div class="gallery">${(s.images || []).slice(0, 6).map((x: string) => q(x)).join('')}</div></div></section>`,
-  cta: (s) => `<section class="section"><div class="container"><div class="cta">
-    <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}
+  cta: (s, o) => `<section class="section"><div class="container"><div class="cta">
+    <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="${esc(o?.cta || '#')}">${esc(s.cta)}</a>` : ''}
   </div></div></section>`,
   // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
   // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.
@@ -138,7 +138,7 @@ export const SECTIONS: Record<string, (s: any) => string> = {
   form: (s) => {
     const fields = (Array.isArray(s.fields) && s.fields.length ? s.fields : [
       { name: 'name', label: 'Full name' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'message', label: 'Message', type: 'textarea' }]);
-    return `<section class="section"><div class="container"><div class="formwrap">
+    return `<section class="section" id="contact-form"><div class="container"><div class="formwrap">
       ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
       <form class="rform" data-form="${esc(s.form || 'contact')}" onsubmit="return relaySubmit(event)">
         ${fields.map((f: any) => f.type === 'textarea'

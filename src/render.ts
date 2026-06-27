@@ -30,14 +30,21 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}}`;
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
-  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s)).join('\n');
+  // Resolve a REAL destination for every CTA button (no dead href="#"): prefer an action page
+  // (contact/sign-up/book/order/shop…), else the last page, else the on-page form anchor.
+  const pgs = ctx.pages || [];
+  const actionRe = /contact|sign-?up|get-?started|book|order|join|quote|demo|enquir|appointment|reserve|shop|buy|started|apply/i;
+  const actionPage = pgs.find((p: any) => actionRe.test(`${p.slug} ${p.title}`));
+  const ctaHref = actionPage ? `${actionPage.slug}.html`
+    : (pgs.length > 1 ? `${pgs[pgs.length - 1].slug}.html` : '#contact-form');
+  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { cta: ctaHref })).join('\n');
   return `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
 ${DS_CSS}</style></head>
 <body class="t-${theme}">
-${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta)}
+${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta, ctaHref)}
 <main>
 ${sections}
 </main>

@@ -97,6 +97,12 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
       return { ok: false, log: 'broken: external/unbundled asset reference — all CSS/fonts must be inlined' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };
+    // INTERACTION: a button that goes nowhere is a defect. Every CTA must have a real target
+    // (a page or an in-page anchor), and every form must be wired to submit.
+    const dead = (raw.match(/<a\b[^>]*class="btn"[^>]*>/gi) || []).filter(b => !/href="/i.test(b) || /href="#"/i.test(b) || /href=""/i.test(b)).length;
+    if (dead) return { ok: false, log: `${dead} dead CTA button(s) (href="#"/empty) — a button must go somewhere` };
+    const unwired = (raw.match(/<form\b[^>]*>/gi) || []).filter(f => !/onsubmit="return relaysubmit/i.test(f) && !/\baction=/i.test(f)).length;
+    if (unwired) return { ok: false, log: `${unwired} form(s) not wired to submit` };
     // home page's screenshot becomes the board thumbnail; other pages get a throwaway shot
     const shot = fileURLToPath(new URL(file === 'index.html' ? 'preview.png' : '_' + file + '.png', dir));
     try {
