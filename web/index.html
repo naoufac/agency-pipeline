@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay — autonomous agency pipeline</title>
+<meta name="description" content="Relay turns a brief into shipped work. A planner explodes it into a dependency graph of AI department-agents that run stage by stage, verified at every step.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#/">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3 7l6 5-6 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11 7l6 5-6 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+      </svg>
+      <span>Relay</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#/" data-route="/">Dashboard</a>
+      <a href="#/projects" data-route="/projects">Projects</a>
+      <a href="#/about" data-route="/about">About</a>
+    </nav>
+    <a class="btn btn-sm nav-cta" href="#/">New brief</a>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="foot">
+    <span>Relay — autonomous agency pipeline</span>
+    <span class="muted">briefs in · shipped work out · verified, never trusted on its word</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

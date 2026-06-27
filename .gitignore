@@ -2,5 +2,5 @@ node_modules/
 *.log
 .DS_Store
 .env
-board.png
+*.png
 chrome.err
