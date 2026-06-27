@@ -136,6 +136,7 @@ function project(id, tab, seq){
         <a class="back" href="#/">‹ Your sites</a>
         <h1 class="ptitle">${esc(b.project.brief)}</h1>
         <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
+        ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
         ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}
