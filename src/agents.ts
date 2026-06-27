@@ -18,7 +18,8 @@ const ROLE: Record<string, string> = {
   research:    'You are the Research department of an automated creative agency. From the brief, output concise market & positioning research. Plain text.',
   branding:    'You are the Branding department. Output ONLY a JSON object of design tokens: {"palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
-  database:    'You are the Database department. Output ONLY runnable PostgreSQL for this app: a CREATE TABLE block for the core entities, THEN 3-6 INSERT statements seeding realistic example rows into the main public-facing table (e.g. products/menu/listings) so the site has real data to display. Use BARE table names (no schema prefix), no DROP/ALTER, no prose, no markdown fences.',
+  database:    'You are the Database department. DESIGN the app\'s data model and output ONLY a JSON object (no prose, no SQL, no fences): {"entities":[{"name":"products","public":true,"display":"name","fields":[{"name":"title","type":"text","required":true},{"name":"price","type":"money","required":true},{"name":"category","type":"ref:categories"},{"name":"in_stock","type":"bool","default":true},{"name":"description","type":"longtext"}],"seed":[{"title":"...","price":12.5,"category":1,"in_stock":true,"description":"..."}]}]}. ' +
+               'Field types: text, longtext, int, money, bool, date, datetime, email, url, slug, image, json. Relations: "type":"ref:<entity>". Rules: model the REAL entities for this brief (3-6 tables, proper relations); mark the main public-facing entity "public":true with "display" set to its title field and SEED it with 4-8 realistic rows; required/unique where it matters. The system COMPILES this into a correct, indexed Postgres schema (serial PKs, FK constraints + indexes, created_at) — you only describe the model. JSON only.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
   media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
   content:     'You are the Content department. Output ONLY ONE valid JSON object (a single object — never two blocks). For sitemap/IA: {"sections":[{"id":"hero","title":"..."}, ...]}. For copy: {"hero":{"headline":"...","body":"..."}, ...}. Invent realistic, specific names and details that fit the brief (a real-sounding business name, real-sounding people/places); NEVER output bracketed placeholders like [Studio Name] or lorem ipsum. Exactly one JSON object, no prose, no markdown, no second block.',
@@ -94,24 +95,22 @@ export async function runAgent(department: string, ctx: Ctx): Promise<string> {
 }
 
 // ---- offline deterministic fallback (no key) ----
-const DB_SQL = `create table users (
-  id serial primary key,
-  phone text unique not null,
-  password_hash text not null
-);
-create table items (
-  id serial primary key,
-  name text not null,
-  price numeric not null
-);
-create table orders (
-  id serial primary key,
-  user_id int references users(id),
-  total numeric not null,
-  status text not null default 'placed'
-);
-insert into items (name, price) values
-  ('Margherita', 9.50), ('Pepperoni', 12.00), ('Garden Salad', 7.25), ('Tiramisu', 6.00);`;
+// offline stub: a JSON DATA MODEL (the engine compiles it to perfect DDL) — exercises the schema compiler
+const DB_SQL = JSON.stringify({
+  entities: [
+    { name: 'menu_items', public: true, display: 'name', fields: [
+      { name: 'name', type: 'text', required: true }, { name: 'price', type: 'money', required: true },
+      { name: 'category', type: 'text' }, { name: 'description', type: 'longtext' }, { name: 'available', type: 'bool', default: true }],
+      seed: [
+        { name: 'Margherita', price: 9.5, category: 'Pizza', description: 'Tomato, mozzarella, basil', available: true },
+        { name: 'Pepperoni', price: 12, category: 'Pizza', description: 'House sausage', available: true },
+        { name: 'Garden Salad', price: 7.25, category: 'Sides', description: 'Seasonal greens', available: true },
+        { name: 'Tiramisu', price: 6, category: 'Dessert', description: 'Classic, espresso-soaked', available: true }] },
+    { name: 'orders', fields: [
+      { name: 'customer_name', type: 'text', required: true }, { name: 'item', type: 'ref:menu_items' },
+      { name: 'total', type: 'money' }, { name: 'status', type: 'text', default: 'placed' }] },
+  ],
+});
 
 function stub(department: string, brief: string): string {
   switch (department) {

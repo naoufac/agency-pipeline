@@ -98,8 +98,10 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
       } else {
-        // REAL NON-HTML DELIVERABLE (e.g. schema.sql): persist the agent's text artifact as-is.
-        const body = task.artifact.endsWith('.sql') ? sqlArtifact(content) : stripFences(content);
+        // REAL NON-HTML DELIVERABLE. schema.sql = the COMPILED, perfect DDL (from the data model);
+        // other artifacts = the agent's text as-is.
+        let body = stripFences(content);
+        if (task.artifact.endsWith('.sql')) { try { body = appdb.compileDDL(content).ddl; } catch { body = sqlArtifact(content); } }
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
       }
     }

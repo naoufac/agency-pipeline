@@ -1,0 +1,115 @@
+// schema.ts — the deterministic DATA-MODEL COMPILER. The database analog of the page renderer:
+// the model describes WHAT (entities, fields, relations); this compiles HOW — flawless, consistent
+// Postgres DDL every time. Every table gets a serial PK and a created_at timestamptz default now();
+// money becomes numeric(12,2); relations become real FK constraints WITH indexes; required/unique/
+// defaults are honoured. Correct by construction — the model never hand-writes SQL, so the schema is
+// always well-formed regardless of the LLM's SQL skill. A raw-SQL fallback keeps older output working.
+
+export type Field = { name: string; type?: string; required?: boolean; unique?: boolean; default?: any; ref?: string };
+export type Entity = { name: string; label?: string; public?: boolean; display?: string; fields?: Field[]; seed?: Record<string, any>[] };
+export type DataModel = { entities: Entity[] };
+
+const IDENT = /^[a-z][a-z0-9_]*$/;
+const snake = (s: any) => String(s ?? '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+
+// closed type vocabulary -> Postgres column type (everything the model can ask for)
+const TYPE: Record<string, string> = {
+  text: 'text', string: 'text', longtext: 'text', richtext: 'text', email: 'text', url: 'text', phone: 'text',
+  slug: 'text', image: 'text', color: 'text', enum: 'text', status: 'text',
+  int: 'integer', integer: 'integer', number: 'numeric', float: 'numeric', decimal: 'numeric',
+  money: 'numeric(12,2)', price: 'numeric(12,2)', currency: 'numeric(12,2)',
+  bool: 'boolean', boolean: 'boolean', checkbox: 'boolean',
+  date: 'date', datetime: 'timestamptz', timestamp: 'timestamptz', time: 'time',
+  json: 'jsonb', jsonb: 'jsonb', uuid: 'uuid',
+};
+const pgType = (t: any) => TYPE[String(t || 'text').toLowerCase()] || 'text';
+const RESERVED = new Set(['id', 'created_at', 'updated_at']);
+
+function lit(v: any, type: string): string {
+  if (v === null || v === undefined) return 'null';
+  if (type === 'boolean') return v === true || v === 'true' ? 'true' : 'false';
+  if (/^(integer|numeric)/.test(type)) { const n = Number(v); return Number.isFinite(n) ? String(n) : 'null'; }
+  if (type === 'jsonb') return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
+  return `'${String(v).replace(/'/g, "''")}'`;
+}
+
+// Detect whether `content` is a JSON data-model (compile it) or raw SQL (caller uses the SQL fallback).
+export function parseModel(content: string): DataModel | null {
+  const t = content.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+  const s = t.indexOf('{'), e = t.lastIndexOf('}');
+  if (s < 0 || e <= s) return null;
+  let obj: any; try { obj = JSON.parse(t.slice(s, e + 1)); } catch { return null; }
+  if (!obj || !Array.isArray(obj.entities) || !obj.entities.length) return null;
+  return obj as DataModel;
+}
+
+// Compile a data-model into perfect Postgres DDL + the table list. Deterministic and self-contained.
+export function compile(model: DataModel): { ddl: string; tables: string[]; warnings: string[] } {
+  const warnings: string[] = [];
+  // normalize + de-dupe entities by snake name
+  const ents: Entity[] = [];
+  for (const raw of model.entities) {
+    const name = snake(raw?.name);
+    if (!IDENT.test(name) || ents.some(e => e.name === name)) { if (raw?.name) warnings.push('dropped entity ' + raw?.name); continue; }
+    ents.push({ ...raw, name });
+  }
+  const names = new Set(ents.map(e => e.name));
+
+  // resolve fields per entity (skip reserved/invalid; resolve refs to known entities)
+  type Col = { name: string; type: string; required: boolean; unique: boolean; def: any; ref?: string };
+  const cols = new Map<string, Col[]>();
+  for (const e of ents) {
+    const list: Col[] = [];
+    for (const f of (e.fields || [])) {
+      const fname = snake(f?.name);
+      if (!IDENT.test(fname) || RESERVED.has(fname) || list.some(c => c.name === fname)) continue;
+      const refSpec = f.ref || (typeof f.type === 'string' && /^ref:/i.test(f.type) ? f.type.slice(4) : null);
+      if (refSpec) {
+        const ref = snake(refSpec);
+        if (!names.has(ref)) { warnings.push(`${e.name}.${fname} -> unknown ref ${refSpec}`); continue; }
+        const col = fname.endsWith('_id') ? fname : fname + '_id';
+        list.push({ name: col, type: 'integer', required: !!f.required, unique: false, def: undefined, ref });
+      } else {
+        list.push({ name: fname, type: pgType(f.type), required: !!f.required, unique: !!f.unique, def: f.default });
+      }
+    }
+    cols.set(e.name, list);
+  }
+
+  // emit tables in dependency order (referenced first); break cycles by demoting the FK to a plain int
+  const order: string[] = []; const seen = new Set<string>(); const stack = new Set<string>();
+  const visit = (n: string) => {
+    if (seen.has(n)) return; if (stack.has(n)) return; stack.add(n);
+    for (const c of cols.get(n) || []) if (c.ref && c.ref !== n) visit(c.ref);
+    stack.delete(n); seen.add(n); order.push(n);
+  };
+  ents.forEach(e => visit(e.name));
+
+  const tables: string[] = []; const ddl: string[] = []; const indexes: string[] = []; const seeds: string[] = [];
+  for (const name of order) {
+    const e = ents.find(x => x.name === name)!; const list = cols.get(name)!;
+    const lines = ['  id serial primary key'];
+    for (const c of list) {
+      const refOk = !c.ref || order.indexOf(c.ref) < order.indexOf(name) || c.ref === name; // only real FK if target precedes
+      let line = `  "${c.name}" ${c.type}`;
+      if (c.required) line += ' not null';
+      if (c.unique) line += ' unique';
+      if (c.def !== undefined && !c.ref) line += ' default ' + lit(c.def, c.type);
+      if (c.ref && refOk) { line += ` references "${c.ref}"(id) on delete set null`; indexes.push(`create index "${name}_${c.name}_idx" on "${name}" ("${c.name}");`); }
+      else if (c.ref) warnings.push(`${name}.${c.name}: FK to ${c.ref} demoted (cycle/forward-ref)`);
+      lines.push(line);
+    }
+    lines.push('  created_at timestamptz not null default now()');
+    ddl.push(`create table "${name}" (\n${lines.join(',\n')}\n);`);
+    tables.push(name);
+    // seeds: only declared scalar (non-ref) columns
+    const scalar = new Map(list.filter(c => !c.ref).map(c => [c.name, c.type] as const));
+    for (const row of (e.seed || []).slice(0, 12)) {
+      const keys = Object.keys(row || {}).map(snake).filter(k => scalar.has(k));
+      if (!keys.length) continue;
+      const vals = keys.map(k => lit((row as any)[k] ?? (row as any)[Object.keys(row).find(o => snake(o) === k) as string], scalar.get(k)!));
+      seeds.push(`insert into "${name}" (${keys.map(k => `"${k}"`).join(', ')}) values (${vals.join(', ')});`);
+    }
+  }
+  return { ddl: [...ddl, ...indexes, ...seeds].join('\n'), tables, warnings };
+}

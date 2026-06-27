@@ -215,8 +215,14 @@ const server = http.createServer(async (req, res) => {
     // ---- Interaction QA (dogfood): a real browser used the site; latest verdict ----
     if (path === '/api/dogfood') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
-      const r = await pool.query("select detail, created_at from run_events where project_id=$1 and type='dogfood' order by id desc limit 1", [id]);
+      const r = await pool.query("select detail, at as created_at from run_events where project_id=$1 and type='dogfood' order by id desc limit 1", [id]);
       return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || { detail: null }));
+    }
+    // ---- The data model the agency designed for this project (live introspection) ----
+    if (path === '/api/schema') {
+      const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      try { return send(res, 200, 'application/json', JSON.stringify(await appdb.describeSchema(pool, id))); }
+      catch (e: any) { return send(res, 200, 'application/json', JSON.stringify({ schema: null, tables: [], error: String(e?.message ?? e).slice(0, 120) })); }
     }
     // ---- Visual QA: a vision model reads the produced pages + reports issues ----
     if (path === '/api/qa') {

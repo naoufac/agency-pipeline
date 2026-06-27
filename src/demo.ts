@@ -3,6 +3,7 @@
 import { makePool, applySchema, ensureDatabase, board, counts } from './db.ts';
 import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
+import * as appdb from './appdb.ts';
 
 // The demo is DESTRUCTIVE (it resets the schema to prove crash/restart). Never let it touch the live
 // board: default to an isolated scratch DB unless the operator explicitly points DATABASE_URL elsewhere.
@@ -43,15 +44,13 @@ async function main() {
   // ---- real assertions (zero-trust: we check the DB, we don't trust a claim) ----
   const c = await counts(pool, projectId);
   const total = (await board(pool, projectId)).length;
-  const dbTask = await pool.query(
-    `select o.content from tasks t join task_outputs o on o.task_id=t.id and o.is_current
-     where t.project_id=$1 and t.department='database'`, [projectId]);
+  const live = await appdb.describeSchema(pool, projectId);   // the data model the agency actually provisioned
   const unblocks = await pool.query(`select count(*)::int n from run_events where project_id=$1 and type='task_unblocked'`, [projectId]);
 
   console.log('\n=== PROOF ===');
   console.log('status counts:', c);
   console.log('unblock events fired by the trigger:', unblocks.rows[0].n);
-  console.log('database task produced real SQL:', /create table/i.test(dbTask.rows[0]?.content ?? ''));
+  console.log('database provisioned (live tables):', live.tables.map((t: any) => `${t.table}(${t.rows} rows)`).join(', ') || 'none');
 
   const allDone = c.done === total && c.failed === 0 && c.blocked === 0 && c.ready === 0 && c.running === 0;
   await pool.end();
