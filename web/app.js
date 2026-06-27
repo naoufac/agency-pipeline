@@ -1,194 +1,297 @@
-// Relay SPA — one app, shared shell, hash router. No scattered pages.
+// Relay SPA — deliverable-first IA. Home (your sites) -> Project (live site is the hero) -> tabs.
 const COLOR = { blocked:'#5C6678', ready:'#E0B341', running:'#5A8DEE', verifying:'#A06CD5', done:'#36B37E', failed:'#F0506E' };
 const app = document.getElementById('app');
-let viewId = null;        // project shown on the dashboard (null = latest)
-let net = null, nodes = null, edges = null, known = new Set(), pollTimer = null;
-
+let poll = null;
 const j = (u, o) => fetch(u, o).then(r => r.json());
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const clearPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
+const ACTIVE = ['ready','running','verifying','blocked'];
 
-function stopPoll(){ if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } net = null; nodes = null; edges = null; known = new Set(); }
+// status of a project from its /api/projects row or board
+const projStatus = p => p.failed ? 'failed' : (p.active ? 'running' : (p.total && p.done === p.total ? 'done' : 'ready'));
 
-/* ---------------- output drawer = the human bridge ---------------- */
-function drawer(){
-  let d = document.getElementById('drawer');
-  if (!d){ d = document.createElement('div'); d.id = 'drawer'; d.className = 'drawer'; document.body.appendChild(d); }
-  return d;
+/* ---------------- output drawer ---------------- */
+function drawerEl(){ let d = document.getElementById('drawer'); if (!d){ d = document.createElement('div'); d.id='drawer'; d.className='drawer'; document.body.appendChild(d);} return d; }
+function closeDrawer(stripSeq){
+  const d = document.getElementById('drawer'); if (d) d.classList.remove('open');
+  if (stripSeq && location.hash.includes('?seq=')) history.replaceState(null,'',location.hash.split('?')[0]);
 }
-async function openOutput(seq){
-  if (!viewId) { const b = await j('/api/board'); viewId = b.project && b.project.id; }
-  const o = await j(`/api/output?id=${viewId}&seq=${seq}`);
-  const d = drawer();
+async function openOutput(id, seq){
+  const o = await j(`/api/output?id=${id}&seq=${seq}`);
+  const d = drawerEl();
   d.innerHTML = `
     <div class="drawer-head">
-      <div>
-        <span class="pill"><i class="dot s-${o.status}"></i>${o.status||''}</span>
-        <span class="muted" style="margin-left:8px">#${o.seq} · ${o.department}</span>
-      </div>
+      <div><span class="pill"><i class="dot s-${o.status}"></i>${o.status||''}</span>
+        <span class="muted" style="margin-left:8px">#${o.seq} · ${esc(o.department)}</span></div>
       <button class="x" aria-label="close">✕</button>
     </div>
     <h3 class="drawer-title">${esc(o.title)}</h3>
-    <div class="muted" style="font-size:12px;margin-bottom:14px">verify: <code>${esc(o.verify)}</code></div>
-    ${o.department === 'build' && o.status === 'done' ? `
-      <a class="btn btn-sm" target="_blank" rel="noopener" href="/sites/${viewId}/" style="margin-bottom:12px">Open the produced site ↗</a>
-      <img src="/sites/${viewId}/preview.png?t=${Date.now()}" alt="site preview" style="display:block;width:100%;border:1px solid var(--line);border-radius:10px;margin-bottom:14px"/>` : ''}
+    <div class="muted" style="font-size:12px;margin-bottom:14px">check: <code>${esc(o.verify)}</code></div>
+    ${(o.department||'').includes('build') && o.status === 'done' ? `
+      <a class="btn btn-sm" target="_blank" rel="noopener" href="/sites/${id}/" style="margin-bottom:12px">Open the produced site ↗</a>
+      <img src="/sites/${id}/preview.png?t=${Date.now()}" alt="preview" style="display:block;width:100%;border:1px solid var(--line);border-radius:10px;margin-bottom:14px"/>` : ''}
     <pre class="output">${esc(o.content) || '<span class="muted">— no output yet —</span>'}</pre>`;
   d.classList.add('open');
-  d.querySelector('.x').onclick = () => d.classList.remove('open');
+  d.querySelector('.x').onclick = () => closeDrawer(true);
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { const d=document.getElementById('drawer'); if(d) d.classList.remove('open'); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(true); });
 
-/* ---------------- KPI strip ---------------- */
-function renderKpis(k){
-  const el = document.getElementById('kpis'); if (!el || !k) return;
-  el.innerHTML = k.kpis.map(m => `
-    <div class="kpi tone-${m.tone}">
-      <div class="kpi-label">${m.label}</div>
-      <div class="kpi-value">${m.value}</div>
-      <div class="kpi-sub">${m.sub}</div>
-    </div>`).join('');
+/* ---------------- HOME · your sites ---------------- */
+function briefBar(){
+  return `<section class="hero compact">
+    <span class="eyebrow">● live · autonomous</span>
+    <h1>What should we build?</h1>
+    <p class="lead">Describe it in a sentence. Relay builds a real, working website you can open.</p>
+    <div class="brief-bar">
+      <input id="brief" class="input" placeholder='Describe the site you want — e.g. "a one-page site explaining our pricing"' />
+      <button id="go" class="btn">Build my site →</button>
+    </div></section>`;
 }
-
-/* ---------------- pages ---------------- */
-function dashboard(){
-  app.innerHTML = `
-  <div class="container">
-    <section class="hero">
-      <span class="eyebrow">● live · autonomous</span>
-      <h1>Briefs in.<br>Shipped work out.</h1>
-      <p class="lead">Hand Relay a brief. A planner explodes it into a dependency graph of department-agents — research, branding, build, QA — that run stage by stage, each one verified before the next begins.</p>
-      <div class="brief-bar">
-        <input id="brief" class="input" placeholder="e.g. build a food delivery app for Lebanon" />
-        <button id="go" class="btn">Run the agency →</button>
-      </div>
-    </section>
-
-    <div class="board-head">
-      <h3 id="blabel">Latest build</h3>
-      <span id="counts" class="pill"></span>
-      <a id="opensite" class="btn btn-sm" target="_blank" rel="noopener" style="display:none">Open the site ↗</a>
-      <div class="legend">${Object.keys(COLOR).map(k=>`<span><i class="dot s-${k}"></i>${k}</span>`).join('')}</div>
-    </div>
-    <div id="kpis" class="kpis"></div>
-    <p class="hint">▸ click any task to read what it produced</p>
-    <div id="net"></div>
-  </div>`;
-
-  document.getElementById('go').onclick = submitBrief;
-  document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
-  const params = new URLSearchParams((location.hash.split('?')[1] || ''));
-  const idp = params.get('id'); if (idp) viewId = idp;
-  initBoard();
-  tick();
-  pollTimer = setInterval(tick, 1000);
-  const tp = params.get('task');
-  if (tp) setTimeout(() => openOutput(Number(tp)), 1400);
-}
-
 async function submitBrief(){
-  const input = document.getElementById('brief');
-  const brief = input.value.trim(); if (!brief) return;
+  const input = document.getElementById('brief'); const brief = input.value.trim(); if (!brief) return;
   const btn = document.getElementById('go'); btn.textContent = 'Planning…'; btn.disabled = true;
   try { const r = await j('/api/run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
-        viewId = r.id; known = new Set(); if (nodes) { nodes.clear(); edges.clear(); } input.value=''; }
-  catch(e){}
-  btn.textContent = 'Run the agency →'; btn.disabled = false;
+        location.hash = '#/p/' + r.id; } catch { btn.textContent = 'Build my site →'; btn.disabled = false; }
 }
-
-function initBoard(){
-  nodes = new vis.DataSet(); edges = new vis.DataSet();
-  net = new vis.Network(document.getElementById('net'), { nodes, edges }, {
-    layout:{ hierarchical:{ direction:'LR', sortMethod:'directed', levelSeparation:210, nodeSpacing:92 } },
-    physics:false,
-    nodes:{ shape:'box', widthConstraint:{ maximum:178 }, margin:11, borderWidth:0,
-            shapeProperties:{ borderRadius:10 }, font:{ color:'#fff', size:13, face:'Inter' } },
-    edges:{ arrows:'to', color:{ color:'#2A3346', highlight:'#7C7AFF' }, smooth:{ type:'cubicBezier', roundness:.55 } },
-    interaction:{ hover:true }
-  });
-  net.on('click', p => { if (p.nodes && p.nodes.length) openOutput(p.nodes[0]); });
-}
-
-async function tick(){
-  if (!nodes) return;
-  let d; try { d = await j('/api/board' + (viewId ? '?id='+viewId : '')); } catch { return; }
-  const lbl = document.getElementById('blabel'), cs = document.getElementById('counts');
-  if (!d.project){ if (lbl) lbl.textContent = 'No builds yet — give Relay a brief above.'; return; }
-  if (!viewId) viewId = d.project.id;
-  if (lbl) lbl.textContent = d.project.brief;
-  const c = {}; d.tasks.forEach(t => c[t.status]=(c[t.status]||0)+1);
-  if (cs) cs.innerHTML = `<span class="count">${c.done||0}</span>&nbsp;/&nbsp;${d.tasks.length} done` + (c.failed?` · ${c.failed} failed`:'');
-  d.tasks.forEach(t => {
-    const n = { id:t.seq, label:`#${t.seq}  ${t.department}\n${t.title}`, color:{ background:COLOR[t.status]||'#555', border:'#0A0C12' } };
-    if (known.has(t.seq)) nodes.update(n); else { nodes.add(n); known.add(t.seq); }
-  });
-  d.edges.forEach(e => { const id='e'+e.from+'_'+e.to; if (!edges.get(id)) edges.add({ id, from:e.from, to:e.to }); });
-  const os = document.getElementById('opensite');
-  if (os) { if (d.site) { os.href = d.site; os.style.display = 'inline-flex'; } else os.style.display = 'none'; }
-  try { renderKpis(await j('/api/kpi?id='+viewId)); } catch {}
-}
-
-async function projects(){
-  app.innerHTML = `<div class="container section"><h2>Projects</h2><p class="muted" style="margin-top:8px">Every brief Relay has run — open its live site, or its build board. Refreshes automatically.</p><div id="plist" class="grid grid-2" style="margin-top:32px"></div></div>`;
-  const wrap = document.getElementById('plist');
-  async function load(){
-   let list; try { list = await j('/api/projects'); } catch { return; }
-   if (!list.length){ wrap.innerHTML = `<div class="empty">No projects yet. Start one from the Dashboard.</div>`; return; }
-   wrap.innerHTML = list.map(p => {
-    const pct = p.total ? Math.round(100*p.done/p.total) : 0;
-    const fp  = p.done ? Math.round(100*p.firstpass/p.done) : 0;
-    const rig = p.total ? Math.round(100*p.realchecks/p.total) : 0;
-    const st = p.failed ? 'failed' : (p.active ? 'running' : (p.done===p.total && p.total ? 'done' : 'ready'));
-    return `<div class="card proj">
-      <div class="row" style="justify-content:space-between">
-        <span class="pill"><i class="dot s-${st}"></i>${st}${p.active?' · live':''}</span>
-        <span class="muted" style="font-size:12px">${p.wall||0}s</span>
-      </div>
-      <div class="brief" style="margin-top:12px">${esc(p.brief)}</div>
-      <div class="bar"><i style="width:${pct}%"></i></div>
-      <div class="kpi-mini">
-        <span><b>${pct}%</b> done</span><span><b>${fp}%</b> first-pass</span><span class="${rig<40?'warn':''}"><b>${rig}%</b> rigor</span>
-      </div>
-      <div class="row" style="margin-top:16px;gap:8px">
-        <a class="btn btn-sm btn-ghost" href="#/?id=${p.id}">View build</a>
+function siteCard(p){
+  const st = projStatus(p), label = st === 'done' ? 'ready' : st;
+  return `<div class="card pcard" data-go="#/p/${p.id}">
+    <div class="thumb${p.site ? '' : ' noimg'}">
+      ${p.site ? `<img src="/sites/${p.id}/preview.png?ts=${Date.now()}" alt="" onerror="this.parentNode.classList.add('noimg');this.remove()"/>` : ''}
+    </div>
+    <div class="pcard-body">
+      <div class="brief">${esc(p.brief)}</div>
+      <div class="row" style="justify-content:space-between;margin-top:14px">
+        <span class="pill"><i class="dot s-${st}"></i>${label}${st === 'running' ? ` · ${p.done}/${p.total}` : ''}</span>
         ${p.site
-          ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open site ↗</a>`
-          : `<span class="muted" style="font-size:12px;align-self:center">no website artifact</span>`}
+          ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open ↗</a>`
+          : `<a class="btn btn-sm btn-ghost" href="#/p/${p.id}">Open project</a>`}
       </div>
-    </div>`; }).join('');
+    </div></div>`;
+}
+function home(){
+  app.innerHTML = `<div class="container">${briefBar()}<div id="sites"></div></div>`;
+  document.getElementById('go').onclick = submitBrief;
+  document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
+  const grp = (title, arr) => arr.length
+    ? `<div class="kpi-label" style="margin:28px 0 14px">${title}</div><div class="grid grid-3">${arr.map(siteCard).join('')}</div>` : '';
+  async function load(){
+    let list; try { list = await j('/api/projects'); } catch { return; }
+    const wrap = document.getElementById('sites'); if (!wrap) return;
+    if (!list.length){ wrap.innerHTML = `<div class="empty">No sites yet. Describe one above and Relay builds it.</div>`; return; }
+    const building = list.filter(p => projStatus(p) === 'running');
+    const rest = list.filter(p => projStatus(p) !== 'running');
+    wrap.innerHTML = grp('Building', building) + grp('Ready', rest);
+    wrap.querySelectorAll('.pcard').forEach(c => c.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = c.getAttribute('data-go'); }));
   }
-  await load();
-  pollTimer = setInterval(load, 4000);
+  load(); poll = setInterval(load, 4000);
+}
+
+function newSite(){
+  app.innerHTML = `<div class="container"><section class="hero" style="text-align:center;max-width:720px;margin:0 auto">
+    <h1>What should we build?</h1>
+    <p class="lead" style="margin-left:auto;margin-right:auto">Describe the website in a sentence. Relay builds it for real.</p>
+    <div class="brief-bar" style="margin-left:auto;margin-right:auto">
+      <input id="brief" class="input" placeholder='e.g. "a one-page site explaining our refund policy"' />
+      <button id="go" class="btn">Build my site →</button>
+    </div></section></div>`;
+  document.getElementById('go').onclick = submitBrief;
+  document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
+  setTimeout(() => document.getElementById('brief')?.focus(), 50);
+}
+
+/* ---------------- PROJECT workspace ---------------- */
+const BUCKETS = [
+  { name:'Understood your brief', re:/research|plan/ },
+  { name:'Writing the content',   re:/content|copy|writ/ },
+  { name:'Designing the look',    re:/brand|design|media|art/ },
+  { name:'Building the site',     re:/build/ },
+  { name:'Final checks',          re:/qa|verif|test|check/ },
+];
+function phaseRows(tasks){
+  const used = new Set(), rows = [];
+  const state = ts => ts.every(t => t.status==='done') ? 'done' : (ts.some(t => ['running','verifying','ready'].includes(t.status)) ? 'run' : 'pend');
+  for (const b of BUCKETS){
+    const ts = tasks.filter(t => b.re.test((t.department||'').toLowerCase()));
+    ts.forEach(t => used.add(t.seq));
+    if (ts.length) rows.push({ name:b.name, state: state(ts) });
+  }
+  const others = tasks.filter(t => !used.has(t.seq));
+  if (others.length) rows.push({ name:'Other steps', state: state(others) });
+  return rows;
+}
+const tabLink = (id, key, label, cur) =>
+  `<a href="#/p/${id}${key==='site'?'':'/'+key}" class="${cur===key?'active':''}">${label}</a>`;
+
+function project(id, tab, seq){
+  app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
+  let wasBuilt = false, prow = {};
+
+  function header(b){
+    const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
+    const st = built ? 'done' : (failed ? 'failed' : 'running');
+    const lab = built ? 'Live' : (failed ? 'Failed' : 'Building');
+    document.getElementById('phead').innerHTML = `
+      <div class="phead">
+        <a class="back" href="#/">‹ Your sites</a>
+        <h1 class="ptitle">${esc(b.project.brief)}</h1>
+        <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
+      </div>
+      <div class="nav-links tabs">
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}
+      </div>`;
+  }
+
+  function siteTab(b){
+    const body = document.getElementById('pbody');
+    const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
+    const done = b.tasks.filter(t=>t.status==='done').length, total = b.tasks.length;
+    if (built){
+      body.innerHTML = `
+        <div class="frame">
+          <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="addr">${location.origin}${b.site}</span></div>
+          <iframe src="${b.site}" title="produced site"></iframe>
+        </div>
+        <div class="actionbar">
+          <a class="btn" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>
+          <button class="btn btn-ghost" id="share">Share link</button>
+          <button class="btn btn-ghost" id="rerun" title="Re-run as a new site">Re-run</button>
+          <span class="muted" style="margin-left:auto;font-size:13px">${prow.wall?`Built in ${prow.wall}s · `:''}${done}/${total} steps · verified</span>
+        </div>`;
+      body.querySelector('#share').onclick = e => { navigator.clipboard?.writeText(location.origin + b.site); e.target.textContent='Copied ✓'; setTimeout(()=>e.target.textContent='Share link',1500); };
+      body.querySelector('#rerun').onclick = async e => { e.target.textContent='Re-running…'; e.target.disabled=true; try{ const r=await j('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({brief:b.project.brief})}); location.hash='#/p/'+r.id; }catch{} };
+    } else if (failed){
+      const blocked = b.tasks.find(t=>t.status==='failed');
+      body.innerHTML = `<div class="empty" style="text-align:left">
+        <h3 style="margin-bottom:8px">A step failed — the site couldn’t finish.</h3>
+        <p class="muted">${blocked?`Blocked at #${blocked.seq} · ${esc(blocked.title)}.`:''} Open “How it was built” to see what happened.</p>
+        <div class="row" style="gap:8px;margin-top:18px">
+          <a class="btn btn-sm" href="#/p/${id}/build">See what happened</a>
+          <button class="btn btn-sm btn-ghost" id="rerun">Re-run as a new site</button>
+        </div></div>`;
+      body.querySelector('#rerun').onclick = async () => { const r=await j('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({brief:b.project.brief})}); location.hash='#/p/'+r.id; };
+    } else {
+      const cur = b.tasks.find(t=>['running','verifying'].includes(t.status));
+      const rows = phaseRows(b.tasks).map(r => `<div class="phase ${r.state}"><span class="mk">${r.state==='done'?'✓':r.state==='run'?'●':'○'}</span>${r.name}</div>`).join('');
+      body.innerHTML = `<div class="card progress">
+        <div class="bar"><i style="width:${total?Math.round(100*done/total):4}%"></i></div>
+        <div class="phasefeed">${rows}</div>
+        <div class="muted" style="margin-top:16px;font-size:13px">${cur?`Step ${cur.seq} of ${total} · ${esc(cur.title)}`:'Working…'}</div>
+        <a class="muted howbuilt" href="#/p/${id}/build">How it’s being built (for the curious) →</a>
+      </div>`;
+    }
+  }
+
+  function buildTab(b){
+    document.getElementById('pbody').innerHTML = `
+      <div class="board-head"><span class="pill"><span class="count">${b.tasks.filter(t=>t.status==='done').length}</span>&nbsp;/&nbsp;${b.tasks.length} done${b.tasks.some(t=>t.status==='failed')?` · ${b.tasks.filter(t=>t.status==='failed').length} failed`:''}</span>
+        <div class="legend">${Object.keys(COLOR).map(k=>`<span><i class="dot s-${k}"></i>${k}</span>`).join('')}</div></div>
+      <p class="hint">▸ click any step to read what it produced</p><div id="net"></div>`;
+    const nodes = new vis.DataSet(), edges = new vis.DataSet();
+    const net = new vis.Network(document.getElementById('net'), { nodes, edges }, {
+      layout:{ hierarchical:{ direction:'LR', sortMethod:'directed', levelSeparation:210, nodeSpacing:92 } }, physics:false,
+      nodes:{ shape:'box', widthConstraint:{maximum:178}, margin:11, borderWidth:0, shapeProperties:{borderRadius:10}, font:{color:'#fff',size:13,face:'Inter'} },
+      edges:{ arrows:'to', color:{color:'#2A3346',highlight:'#7C7AFF'}, smooth:{type:'cubicBezier',roundness:.55} }, interaction:{hover:true} });
+    b.tasks.forEach(t => nodes.add({ id:t.seq, label:`#${t.seq}  ${t.department}\n${t.title}`, color:{background:COLOR[t.status]||'#555',border:'#0A0C12'} }));
+    b.edges.forEach(e => edges.add({ id:'e'+e.from+'_'+e.to, from:e.from, to:e.to }));
+    net.on('click', p => { if (p.nodes && p.nodes.length){ history.replaceState(null,'',`#/p/${id}/files?seq=${p.nodes[0]}`); openOutput(id, p.nodes[0]); } });
+  }
+
+  function filesTab(b){
+    const groups = {};
+    b.tasks.forEach(t => { const d = (t.department||'other'); (groups[d] = groups[d]||[]).push(t); });
+    document.getElementById('pbody').innerHTML = Object.entries(groups).map(([d, ts]) => `
+      <div class="kpi-label" style="margin:22px 0 10px">${esc(d)}</div>
+      ${ts.map(t => `<div class="card filerow" data-seq="${t.seq}">
+        <span class="pill"><i class="dot s-${t.status}"></i>${t.status}</span>
+        <span class="fname">#${t.seq} · ${esc(t.title)}</span>
+        ${(t.department||'').includes('build') && t.status==='done' && b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open site ↗</a>` : ''}
+        <a class="btn btn-sm btn-ghost view">View output</a></div>`).join('')}`).join('');
+    document.querySelectorAll('.filerow').forEach(r => r.addEventListener('click', e => {
+      if (e.target.closest('a[target]')) return;
+      const s = r.getAttribute('data-seq'); history.replaceState(null,'',`#/p/${id}/files?seq=${s}`); openOutput(id, s);
+    }));
+    if (seq) setTimeout(() => openOutput(id, seq), 60);
+  }
+
+  async function metricsTab(){
+    const k = await j('/api/kpi?id=' + id);
+    const extra = [];
+    if (prow.total) extra.push({label:'First-pass', value:Math.round(100*prow.firstpass/(prow.done||1))+'%', sub:`${prow.firstpass}/${prow.done}`, tone:'neutral'});
+    if (prow.total) extra.push({label:'Verification rigor', value:Math.round(100*prow.realchecks/prow.total)+'%', sub:`${prow.realchecks}/${prow.total} real checks`, tone:'neutral'});
+    if (prow.wall) extra.push({label:'Wall-clock', value:prow.wall+'s', sub:'end to end', tone:'neutral'});
+    const all = (k?.kpis||[]).concat(extra);
+    document.getElementById('pbody').innerHTML = `
+      <p class="muted" style="margin-bottom:18px">How this build performed. Relay verifies every step — it never takes the agent’s word.</p>
+      <div class="kpis">${all.map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
+  }
+
+  async function load(){
+    let b; try { b = await j('/api/board?id=' + id); } catch { return; }
+    if (!b.project){ app.innerHTML = `<div class="container section"><div class="empty">Project not found. <a href="#/">‹ Your sites</a></div></div>`; clearPoll(); return; }
+    if (!prow.id) { try { prow = (await j('/api/projects')).find(p => p.id === id) || {}; } catch {} }
+    const built = !!b.site;
+    // while-building auto-promotion: if no explicit tab and still building -> show build narration on Site
+    header(b);
+    if (tab === 'site') siteTab(b);
+    else if (tab === 'build') buildTab(b);
+    else if (tab === 'files') filesTab(b);
+    else if (tab === 'metrics') metricsTab();
+    // resolution moment
+    if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
+    wasBuilt = built;
+    if (built || b.tasks.some(t=>t.status==='failed')) clearPoll();
+  }
+  load();
+  poll = setInterval(load, 1000);
+}
+
+function toast(msg){
+  let t = document.getElementById('toast'); if (!t){ t = document.createElement('div'); t.id='toast'; t.className='toast'; document.body.appendChild(t); }
+  t.innerHTML = `<span class="pill s-done"><i class="dot s-done"></i>${msg}</span>`; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
 }
 
 function about(){
   app.innerHTML = `<div class="container section"><div class="prose">
     <span class="eyebrow">About Relay</span>
     <h1 style="margin-top:16px">An agency that runs itself.</h1>
-    <p style="margin-top:16px">Relay is an autonomous creative + engineering agency. You give it a brief; it delivers shipped work — not a to-do list. Under the hood it mimics how a real studio passes a project desk to desk, but every hand-off is a machine step that proves itself before the next one starts.</p>
+    <p style="margin-top:16px">You give Relay a brief; it delivers a real, working website — not a to-do list. It mimics how a studio passes a project desk to desk, but every hand-off is a machine step that proves itself before the next one starts.</p>
     <h2>How it works</h2>
     <div class="steps">
-      <div class="step"><div><b>1 · Plan</b><span class="muted">A planner reads the brief and explodes it into a dependency graph of tasks — who depends on whom.</span></div></div>
-      <div class="step"><div><b>2 · Run, stage by stage</b><span class="muted">Independent tasks run in parallel; dependent ones wait. Finishing a task unblocks the next.</span></div></div>
-      <div class="step"><div><b>3 · Verify, never trust</b><span class="muted">A task is only “done” when a deterministic check passes. An agent’s word counts for nothing.</span></div></div>
-      <div class="step"><div><b>4 · Ship</b><span class="muted">Real artifacts, assembled and accepted automatically. Brief in, shipped work out.</span></div></div>
+      <div class="step"><div><b>1 · Plan</b><span class="muted">It reads your brief and breaks it into steps with dependencies.</span></div></div>
+      <div class="step"><div><b>2 · Build, stage by stage</b><span class="muted">Independent steps run in parallel; dependent ones wait their turn.</span></div></div>
+      <div class="step"><div><b>3 · Verify, never trust</b><span class="muted">A step is only “done” when a real check passes — the site actually renders.</span></div></div>
+      <div class="step"><div><b>4 · Ship</b><span class="muted">A real website you can open and share.</span></div></div>
     </div>
-    <h2>Principles</h2>
-    <p><b style="color:var(--text)">Autonomous.</b> No human in the loop.<br>
-       <b style="color:var(--text)">Zero-trust.</b> Completion is proven by checks the model can’t fake.<br>
-       <b style="color:var(--text)">Real output.</b> Code and artifacts, not descriptions.</p>
-    <p style="margin-top:32px"><a class="btn" href="#/">Give Relay a brief →</a></p>
+    <p style="margin-top:32px"><a class="btn" href="#/">Build my first site →</a></p>
   </div></div>`;
 }
 
 /* ---------------- router ---------------- */
-const routes = { '/':dashboard, '/projects':projects, '/about':about };
 function router(){
-  stopPoll();
-  const d = document.getElementById('drawer'); if (d) d.classList.remove('open');
-  const path = (location.hash.replace(/^#/, '') || '/').split('?')[0];
-  document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === path));
-  (routes[path] || dashboard)();
-  window.scrollTo(0, 0);
+  clearPoll(); closeDrawer(false);
+  let raw = location.hash.replace(/^#/, '') || '/';
+  // legacy redirects
+  const q0 = raw.split('?')[1] || '';
+  if (raw.startsWith('/?')) {
+    const sp = new URLSearchParams(q0);
+    if (sp.get('id')) { location.replace('#/p/' + sp.get('id') + (sp.get('task') ? '/files?seq=' + sp.get('task') : '')); return; }
+  }
+  if (raw === '/projects') { location.replace('#/'); return; }
+
+  const [path, query] = raw.split('?');
+  const seg = path.split('/').filter(Boolean);
+  const seq = new URLSearchParams(query || '').get('seq');
+  let navPath = '/';
+  if (!seg.length) home();
+  else if (seg[0] === 'new') { navPath = '/new'; newSite(); }
+  else if (seg[0] === 'about') { navPath = '/about'; about(); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else home();
+
+  document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));
+  if (!query) window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', router);
 router();
