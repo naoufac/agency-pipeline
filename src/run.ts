@@ -1,9 +1,18 @@
-// Real entrypoint: plan a brief and run it to completion. `npm run run -- "your brief"`
-import { makePool, applySchema, board } from './db.ts';
+// Dev CLI: plan a brief and run it to completion. `npm run run -- "your brief"`
+// Like the demo it RESETS the schema, so it defaults to an ISOLATED scratch DB and never touches a
+// live board. To run against a real board, set DATABASE_URL explicitly (and RESET=0 to append, not wipe).
+// Production briefs do NOT use this file — they come through POST /api/run in server.ts (no schema reset).
+import { makePool, applySchema, ensureDatabase, board } from './db.ts';
 import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
 
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:5439/agency_test';
+  process.env.ALLOW_DB_RESET = '1';
+}
+
 async function main() {
+  if (process.env.DATABASE_URL?.endsWith('/agency_test')) await ensureDatabase('agency_test');
   const pool = makePool();
   if (process.env.RESET !== '0') await applySchema(pool);
   const brief = process.argv[2] || 'build a delivery app';

@@ -26,8 +26,9 @@ export async function applySchema(pool: pg.Pool): Promise<void> {
   catch (e: any) { if (e?.code !== '42P01') throw e; }   // 42P01 = no projects table yet → fresh DB, safe
   if (existing > 0 && process.env.ALLOW_DB_RESET !== '1')
     throw new Error(
-      `applySchema refused: 'projects' already has ${existing} row(s) — this looks like a LIVE board ` +
-      `(DATABASE_URL=${maskUrl(dbUrl())}). Point DATABASE_URL at a scratch DB, or set ALLOW_DB_RESET=1 to override.`);
+      `applySchema REFUSED — this is a populated board: 'projects' has ${existing} row(s) ` +
+      `(DATABASE_URL=${maskUrl(dbUrl())}). Resetting it DROPS every project. Do NOT override to make a ` +
+      `test/run pass — point DATABASE_URL at a scratch DB instead (the demo/run CLIs already do).`);
   const sql = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8');
   await pool.query(sql);
 }

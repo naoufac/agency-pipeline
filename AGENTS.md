@@ -175,6 +175,18 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
 
 ## 5. Known gotchas (these have bitten before)
 
+- **NEVER run `npm run demo` / `npm run run` against the live board — they DROP the schema.** Both
+  reset the DB to prove crash/restart, and the default `DATABASE_URL` is the live `agency` board. They
+  now **default to an isolated `agency_test` DB** and `db.ts` `applySchema()` **refuses** to drop a DB
+  whose `projects` table is non-empty unless `ALLOW_DB_RESET=1`. Do **not** set `ALLOW_DB_RESET=1` just
+  to make a test/run pass — that is exactly how a live board got wiped once (recovered from
+  `/root/backups/relay-db`). To exercise a real board, set `DATABASE_URL` explicitly **and** `RESET=0`
+  (append, never wipe). Production briefs go through `POST /api/run` in `server.ts`, which never resets.
+- **Themes are STRUCTURE (deterministic), in `src/themes.ts`.** The brief is classified
+  (`classifyTheme`, brief-rooted, de-accented, closed set of 5) into a design language; the renderer
+  expands it into fonts + type scale + rhythm + shape, WCAG-safe by construction. The LLM may only
+  *name* a theme (validated by `themeFor`, deterministic fallback) — it never authors CSS. Prove theme
+  changes with `npm run theme:check` (renders all 5, runs the real `site_renders` gate + AA, mobile+desktop).
 - **`firstJson` parses ONE brace-balanced block.** Agents (esp. `content`/`copywriting`) sometimes
   emit two JSON objects back-to-back. `firstJson()` in `verify.ts` walks braces and returns the
   first complete object; the prompts explicitly say "exactly one JSON object, no second block." If
@@ -256,13 +268,13 @@ gates above before you call anything done.
 
 ## 7. Production / durability (one paragraph; details in `docs/OPERATIONS.md`)
 
-Relay's HTTP server currently runs via a bare `npm exec tsx src/server.ts` (parent `init`, **no
-supervisor**) — it dies on crash/reboot and must be put under a supervisor to last. Postgres is the
-`ap-pg` docker container (`restart=unless-stopped`, survives reboot). Public traffic to
-`board.naples.agency` currently flows Cloudflare → a **manually-started** `cloudflared` named tunnel
-(`anouf-chat`) → `127.0.0.1:8787`; an **enabled-but-inactive** systemd unit
-`anouf-named-tunnel.service` already exists to run that tunnel durably (the manual `nohup` process
-duplicates it). Tailscale Funnel also already fronts `:8787` at `anouf.tailbb043c.ts.net`. **Other
+Relay's HTTP server runs under **systemd as `relay.service`** (tsx `src/server.ts` on `:8787`,
+restart-on-failure, survives reboot) — **deploy a code change with `systemctl restart relay.service`**,
+then confirm `curl localhost:8787/healthz` → `ok` (tsx reads source fresh, so the restart picks up the
+new code; the runner is stateless and resumes from the DB). Postgres is the `ap-pg` docker container
+(`restart=unless-stopped`, survives reboot). Public traffic to `board.naples.agency` flows Cloudflare →
+**`relay-tunnel.service`** (`cloudflared`) → `127.0.0.1:8787`. Tailscale Funnel also fronts `:8787` at
+`anouf.tailbb043c.ts.net`. **Other
 people's live services share this box** — `saiid-wp-caddy-1` owns `:80/:443` on the public IP,
 `ephemeris` is served by host Caddy, and `dash`/`gab44`/`fleet*` ride the same cloudflared tunnel —
 **do not stop, rebind, or "clean up" any of them.** Read `docs/OPERATIONS.md` before changing
