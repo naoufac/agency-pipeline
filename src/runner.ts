@@ -32,19 +32,26 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
-  const ctx = await buildContext(pool, task);
-  const content = await runAgent(task.department, ctx);     // the agent: text in -> text out
+  try {
+    const ctx = await buildContext(pool, task);
+    const content = await runAgent(task.department, ctx);     // the agent: text in -> text out (MiniMax or stub)
 
-  await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
-  await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
-  await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
+    await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+    await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
 
-  const { ok, log } = await verify(pool, task.verify, content);   // deterministic check — not the agent's word
-  if (ok) {
-    await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
-    await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
-  } else {
-    await ev(pool, task.project_id, task.id, 'verify_failed', `#${task.seq}: ${log}`);
+    const { ok, log } = await verify(pool, task.verify, content);   // deterministic check — not the agent's word
+    if (ok) {
+      await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
+      await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
+    } else {
+      await ev(pool, task.project_id, task.id, 'verify_failed', `#${task.seq}: ${log}`);
+      const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';
+      await pool.query(`update tasks set status=$2, claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1`, [task.id, next]);
+    }
+  } catch (e: any) {
+    // agent/API error (e.g. MiniMax down): never crash the loop; retry, then fail.
+    await ev(pool, task.project_id, task.id, 'agent_error', `#${task.seq}: ${(e?.message ?? String(e)).slice(0, 280)}`);
     const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';
     await pool.query(`update tasks set status=$2, claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1`, [task.id, next]);
   }

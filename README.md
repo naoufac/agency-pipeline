@@ -38,7 +38,9 @@ npm run demo             # plan -> run -> CRASH after 3 steps -> restart -> fini
 npm run run -- "build a delivery app"   # plan + run a brief to completion
 ```
 
-`db/schema.sql` is the engine (DDL + unblock trigger + `v_ready_tasks`). `src/`: `planner` (brief → DAG), `runner` (the scheduler loop), `agents` (one API call each — stubbed here), `verify` (the deterministic checks).
+`db/schema.sql` is the engine (DDL + unblock trigger + `v_ready_tasks`). `src/`: `planner` (brief → DAG), `runner` (the scheduler loop), `agents` (one API call each), `verify` (the deterministic checks).
+
+**Agents use MiniMax** (OpenAI-compatible). Set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`) to go live; with no key, deterministic stubs run so the engine still works offline. See `.env.example`.
 
 ## Status
 
