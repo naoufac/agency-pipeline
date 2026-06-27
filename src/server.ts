@@ -20,14 +20,16 @@ process.on('uncaughtException', (e: any) => { console.error('uncaughtException',
 
 // /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
 // (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
-const RUN_HITS = new Map<string, number[]>();
-const RUN_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, MAX_ACTIVE_PROJECTS = 6;
-function rateLimited(ip: string): boolean {
+const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>();
+const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = 40, MAX_ACTIVE_PROJECTS = 6;
+function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   const now = Date.now();
-  const arr = (RUN_HITS.get(ip) || []).filter((t) => now - t < RUN_WINDOW_MS);
-  if (arr.length >= RUN_MAX_PER_IP) { RUN_HITS.set(ip, arr); return true; }
-  arr.push(now); RUN_HITS.set(ip, arr); return false;
+  const arr = (map.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (arr.length >= max) { map.set(ip, arr); return true; }
+  arr.push(now); map.set(ip, arr); return false;
 }
+const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
+const publishLimited = (ip: string) => limited(PUB_HITS, PUB_MAX_PER_IP, ip); // /api/page/publish: cheap + frequent during editing
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {
@@ -86,6 +88,7 @@ const server = http.createServer(async (req, res) => {
     // serve the produced website(s): /sites/<projectId>/[file]
     if (path.startsWith('/sites/')) {
       let rel = decodeURIComponent(path.slice('/sites/'.length)).replace(/\.\.+/g, '');
+      if (/\.tmp$/i.test(rel)) return send(res, 404, 'text/plain', 'not found');   // never serve an unverified republish candidate
       if (rel === '' || rel.endsWith('/')) rel += 'index.html';
       else if (!/\.[a-z0-9]+$/i.test(rel)) rel += '/index.html';
       const f = fileURLToPath(new URL(rel, SITES));
@@ -152,11 +155,12 @@ const server = http.createServer(async (req, res) => {
       const { id, slug } = body;
       if (!id || !slug) return send(res, 400, 'application/json', '{"error":"id+slug required"}');
       const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
-      if (rateLimited(ip)) return send(res, 429, 'application/json', '{"error":"too many publishes — try again shortly"}');
+      if (publishLimited(ip)) return send(res, 429, 'application/json', '{"error":"too many publishes — try again shortly"}');
       const snap = (await pool.query('select state from page_snapshots where project_id=$1 and slug=$2', [id, slug])).rows[0];
       if (!snap) return send(res, 404, 'application/json', '{"error":"page not editable"}');
-      if (snap.state === 'publishing') return send(res, 409, 'application/json', '{"error":"already publishing"}');
-      await pool.query("update page_snapshots set state='publishing', updated_at=now() where project_id=$1 and slug=$2", [id, slug]);
+      // atomic claim — only ONE concurrent publish per page wins (no SELECT-then-UPDATE TOCTOU)
+      const claim = await pool.query("update page_snapshots set state='publishing', updated_at=now() where project_id=$1 and slug=$2 and state<>'publishing' returning id", [id, slug]);
+      if (!claim.rowCount) return send(res, 409, 'application/json', '{"error":"already publishing"}');
       republishPage(pool, id, slug).catch((e) => console.error('republish', id, slug, e?.message));   // fire-and-forget; status polled
       return send(res, 202, 'application/json', '{"ok":true,"state":"publishing"}');
     }
@@ -202,3 +206,9 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
     if (r.rows.length) console.log('resuming', r.rows.length, 'unfinished project(s)');
   } catch (e: any) { console.error('resume failed', e?.message); }
 })();
+
+// CMS restart-safety: a publish interrupted by a crash/restart is stuck at 'publishing' (snapshots have
+// no lease). Release it so the page stays editable. Runs on boot + every 2 min.
+const reclaimPublishing = () => pool.query("update page_snapshots set state='failed', log='publish interrupted — please retry', updated_at=now() where state='publishing' and updated_at < now() - interval '5 minutes'").catch(() => {});
+reclaimPublishing();
+setInterval(reclaimPublishing, 120000).unref?.();

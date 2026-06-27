@@ -15,6 +15,7 @@ import { verify, SITES } from './verify.ts';
 import { ev } from './db.ts';
 
 const TAGS = 'h[1-6]|p|li|blockquote|figcaption|button';
+const ATTRS = '(?:"[^"]*"|\'[^\']*\'|[^>"\'])*';   // quote-aware start-tag attribute span (handles '>' inside quotes)
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const decodeEntities = (s: string) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'");
@@ -36,17 +37,20 @@ export async function cleanBody(content: string, dirUrl: URL): Promise<string> {
 }
 
 // stamp a stable data-edit id on each editable block-leaf, in document order. Idempotent.
+// CMS owns the data-edit namespace: any agent-authored data-edit ATTR is dropped (so ids can't collide),
+// while data-edit text in the COPY is untouched. Quote-aware so '>' inside an attribute value is safe.
 export function instrument(html: string): string {
   let n = 0;
-  return html.replace(new RegExp(`<(${TAGS})\\b([^>]*)>([\\s\\S]*?)<\\/\\1>`, 'gi'), (m, tag, attrs, inner) => {
-    if (/\bdata-edit=/.test(attrs)) return m;
+  return html.replace(new RegExp(`<(${TAGS})\\b(${ATTRS})>([\\s\\S]*?)<\\/\\1>`, 'gi'), (_m, tag, attrs, inner) => {
+    attrs = attrs.replace(/\s+data-edit\s*=\s*("[^"]*"|'[^']*')/gi, '');
     return `<${tag} data-edit="e${n++}"${attrs}>${inner}</${tag}>`;
   });
 }
 
-// remove the editing markers before the page ships
+// EXACT inverse of instrument: remove ONLY the id we stamped as the first attr of an editable start tag.
+// Never touches a data-edit="..." sitting in the page copy or text — so the round-trip is byte-identical.
 export function stripEditAttrs(html: string): string {
-  return html.replace(/\s+data-edit="[^"]*"/gi, '');
+  return html.replace(new RegExp(`(<(?:${TAGS})\\b)\\sdata-edit="e\\d+"`, 'gi'), '$1');
 }
 
 // the FINAL ship step, identical for build and republish
@@ -58,11 +62,11 @@ export interface Block { block_id: string; kind: string; label: string; seq: num
 
 // list the editable blocks of an instrumented snapshot
 export function extractBlocks(html: string): Block[] {
-  const re = new RegExp(`<(${TAGS})\\b[^>]*\\bdata-edit="([^"]+)"[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
+  const re = new RegExp(`<(${TAGS})\\sdata-edit="([^"]+)"(${ATTRS})>([\\s\\S]*?)<\\/\\1>`, 'gi');
   const out: Block[] = []; let m: RegExpExecArray | null; let seq = 0;
   while ((m = re.exec(html))) {
-    const [, tag, id, inner] = m;
-    const hasChild = /<[a-z!/]/i.test(inner);              // nested markup -> not safe to edit in v1
+    const [, tag, id, , inner] = m;
+    const hasChild = /<\/[a-z]/i.test(inner) || /<(?:br|hr|img|input|source|wbr|svg|path|use)\b/i.test(inner);   // real child element (paired close or known void) — NOT 'a<b' text
     const raw = hasChild ? inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ') : inner;   // read-only: show plain text, no tags
     const text = decodeEntities(raw).trim();
     if (!text) continue;                                   // skip empty
@@ -74,7 +78,7 @@ export function extractBlocks(html: string): Block[] {
 // pure substitution: replace ONLY the inner of edited (non-read-only) data-edit nodes
 export function applyOverlay(html: string, edits: Map<string, string>): string {
   if (!edits.size) return html;
-  return html.replace(new RegExp(`<(${TAGS})\\sdata-edit="([^"]+)"([^>]*)>([\\s\\S]*?)<\\/\\1>`, 'gi'),
+  return html.replace(new RegExp(`<(${TAGS})\\sdata-edit="([^"]+)"(${ATTRS})>([\\s\\S]*?)<\\/\\1>`, 'gi'),
     (m, tag, id, post, _inner) => edits.has(id) ? `<${tag} data-edit="${id}"${post}>${escapeHtml(edits.get(id)!)}</${tag}>` : m);
 }
 
@@ -87,7 +91,8 @@ export async function syncBlocks(pool: pg.Pool, projectId: string, slug: string,
     await c.query(
       `insert into page_snapshots(project_id,slug,artifact,src_html,state,log,updated_at)
        values($1,$2,$3,$4,'live','',now())
-       on conflict(project_id,slug) do update set src_html=excluded.src_html, artifact=excluded.artifact, state='live', updated_at=now()`,
+       on conflict(project_id,slug) do update set src_html=excluded.src_html, artifact=excluded.artifact,
+         state=(case when page_snapshots.state='publishing' then page_snapshots.state else 'live' end), updated_at=now()`,
       [projectId, slug, artifact, snapshot]);
     for (const b of blocks)
       await c.query(
@@ -105,28 +110,36 @@ export async function syncBlocks(pool: pg.Pool, projectId: string, slug: string,
 export async function republishPage(pool: pg.Pool, projectId: string, slug: string): Promise<{ ok: boolean; log: string }> {
   const snap = (await pool.query('select artifact, src_html from page_snapshots where project_id=$1 and slug=$2', [projectId, slug])).rows[0];
   if (!snap) return { ok: false, log: 'no editable snapshot for this page' };
-  // overlay every block that has EVER been edited (dirty) or has a pending draft — so prior
-  // published edits persist across publishes; untouched blocks are never overlaid (byte-identical).
-  const edits = new Map<string, string>();
-  const dr = await pool.query('select block_id, coalesce(draft, published) as val from page_blocks where project_id=$1 and slug=$2 and read_only=false and (draft is not null or dirty)', [projectId, slug]);
-  for (const r of dr.rows) edits.set(r.block_id, r.val);
-
-  const candidate = shipHtml(applyOverlay(snap.src_html, edits));
   const dir = new URL(projectId + '/', SITES);
   const tmpArt = snap.artifact + '.tmp';
   const tmpPath = fileURLToPath(new URL(tmpArt, dir));
   const livePath = fileURLToPath(new URL(snap.artifact, dir));
-  writeFileSync(tmpPath, candidate);
+  try {
+    // overlay every block that has EVER been edited (dirty) or has a pending draft — so prior
+    // published edits persist across publishes; untouched blocks are never overlaid (byte-identical).
+    const edits = new Map<string, string>();
+    const dr = await pool.query('select block_id, coalesce(draft, published) as val from page_blocks where project_id=$1 and slug=$2 and read_only=false and (draft is not null or dirty)', [projectId, slug]);
+    for (const r of dr.rows) edits.set(r.block_id, r.val);
 
-  const { ok, log } = await verify(pool, { project_id: projectId, artifact: tmpArt, verify: 'site_renders' }, candidate);
-  if (ok) {
-    renameSync(tmpPath, livePath);                                       // atomic, same dir/fs
-    await pool.query('update page_blocks set published=draft, dirty=true, draft=null, updated_at=now() where project_id=$1 and slug=$2 and draft is not null', [projectId, slug]);
-    await pool.query("update page_snapshots set state='live', log=$3, updated_at=now() where project_id=$1 and slug=$2", [projectId, slug, log]);
-    await ev(pool, projectId, null, 'page_republished', `${slug}.html re-published [${log}]`);
-  } else {
-    try { unlinkSync(tmpPath); } catch {}                                // live file never touched
-    await pool.query("update page_snapshots set state='failed', log=$3, updated_at=now() where project_id=$1 and slug=$2", [projectId, slug, log]);
+    const candidate = shipHtml(applyOverlay(snap.src_html, edits));
+    writeFileSync(tmpPath, candidate);
+    const { ok, log } = await verify(pool, { project_id: projectId, artifact: tmpArt, verify: 'site_renders' }, candidate);
+    if (ok) {
+      renameSync(tmpPath, livePath);                                     // atomic, same dir/fs
+      // fold ONLY the exact values we shipped; if the user edited a block mid-publish, keep that newer draft
+      for (const [bid, val] of edits)
+        await pool.query("update page_blocks set published=$3, dirty=true, draft=(case when draft=$3 then null else draft end), updated_at=now() where project_id=$1 and slug=$2 and block_id=$4", [projectId, slug, val, bid]);
+      await pool.query("update page_snapshots set state='live', log=$3, updated_at=now() where project_id=$1 and slug=$2", [projectId, slug, log]);
+      await ev(pool, projectId, null, 'page_republished', `${slug}.html re-published [${log}]`);
+    } else {
+      try { unlinkSync(tmpPath); } catch {}                             // live file never touched
+      await pool.query("update page_snapshots set state='failed', log=$3, updated_at=now() where project_id=$1 and slug=$2", [projectId, slug, log]);
+    }
+    return { ok, log };
+  } catch (e: any) {                                                     // never strand state at 'publishing'
+    try { unlinkSync(tmpPath); } catch {}
+    const msg = 'publish error: ' + (e?.message ?? e);
+    try { await pool.query("update page_snapshots set state='failed', log=$3, updated_at=now() where project_id=$1 and slug=$2", [projectId, slug, msg]); } catch {}
+    return { ok: false, log: msg };
   }
-  return { ok, log };
 }
