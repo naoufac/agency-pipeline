@@ -102,13 +102,16 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     lines.push('  created_at timestamptz not null default now()');
     ddl.push(`create table "${name}" (\n${lines.join(',\n')}\n);`);
     tables.push(name);
-    // seeds: only declared scalar (non-ref) columns
-    const scalar = new Map(list.filter(c => !c.ref).map(c => [c.name, c.type] as const));
+    // seeds: scalar columns by name; FK columns by the field name OR <field>_id, when given an integer id
+    const colByKey = (k: string) => list.find(c => !c.ref && c.name === k) || list.find(c => c.ref && (c.name === k || c.name === k + '_id'));
     for (const row of (e.seed || []).slice(0, 12)) {
-      const keys = Object.keys(row || {}).map(snake).filter(k => scalar.has(k));
-      if (!keys.length) continue;
-      const vals = keys.map(k => lit((row as any)[k] ?? (row as any)[Object.keys(row).find(o => snake(o) === k) as string], scalar.get(k)!));
-      seeds.push(`insert into "${name}" (${keys.map(k => `"${k}"`).join(', ')}) values (${vals.join(', ')});`);
+      const used = Object.keys(row || {})
+        .map(k => ({ col: colByKey(snake(k)), v: (row as any)[k] }))
+        .filter((x): x is { col: NonNullable<ReturnType<typeof colByKey>>; v: any } => !!x.col && (!x.col.ref || Number.isInteger(Number(x.v))));
+      if (!used.length) continue;
+      const cols2 = used.map(x => x.col.name);
+      const vals = used.map(x => lit(x.col.ref ? Number(x.v) : x.v, x.col.type));
+      seeds.push(`insert into "${name}" (${cols2.map(c => `"${c}"`).join(', ')}) values (${vals.join(', ')});`);
     }
   }
   return { ddl: [...ddl, ...indexes, ...seeds].join('\n'), tables, warnings };

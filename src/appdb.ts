@@ -98,15 +98,44 @@ function coerce(v: any, type: string): any {
   return String(v);
 }
 
+// pick a human display column for a table: name/title/label, else the first text column, else id
+async function displayColumn(pool: pg.Pool, schema: string, table: string): Promise<string> {
+  const cols = await typedColumns(pool, schema, table);
+  const pref = cols.find(c => ['name', 'title', 'label'].includes(c.name));
+  if (pref) return pref.name;
+  const txt = cols.find(c => /char|text/.test(c.type) && c.name !== 'id');
+  return txt ? txt.name : 'id';
+}
+
 // Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
+// RELATION-AWARE: each FK column (x_id -> table y) is resolved to y's display value and exposed as `x`,
+// so a collection shows "Category: Ceramics", not "category_id: 3". Secrets are stripped.
 export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50): Promise<any[]> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return [];
   const tables = await listTables(pool, projectId);
   if (!tables.includes(table)) return [];
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
-  const r = await pool.query(`select * from "${schema}"."${table}" limit ${lim}`);
-  return r.rows.map((row: any) => { const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k]; return o; });
+  const rows = (await pool.query(`select * from "${schema}"."${table}" order by id desc limit ${lim}`)).rows;
+  try {
+    const fks = (await pool.query(
+      `select kcu.column_name as col, ccu.table_name as ref
+       from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu on kcu.constraint_name=tc.constraint_name and kcu.table_schema=tc.table_schema
+       join information_schema.constraint_column_usage ccu on ccu.constraint_name=tc.constraint_name and ccu.table_schema=tc.table_schema
+       where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table])).rows;
+    for (const fk of fks) {
+      if (!IDENT.test(fk.col) || !IDENT.test(fk.ref) || !tables.includes(fk.ref)) continue;
+      const ids = [...new Set(rows.map((r: any) => r[fk.col]).filter((v: any) => v != null))];
+      if (!ids.length) continue;
+      const dcol = await displayColumn(pool, schema, fk.ref);
+      if (!IDENT.test(dcol)) continue;
+      const map = new Map((await pool.query(`select id, "${dcol}" as d from "${schema}"."${fk.ref}" where id = any($1)`, [ids])).rows.map((r: any) => [r.id, r.d]));
+      const label = fk.col.replace(/_id$/, '');
+      for (const r of rows) { r[label] = map.get(r[fk.col]) ?? null; delete r[fk.col]; }
+    }
+  } catch {}
+  return rows.map((row: any) => { const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k]; return o; });
 }
 
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.
