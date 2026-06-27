@@ -6,6 +6,7 @@ import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
+import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
@@ -156,6 +157,9 @@ export async function runLoop(
   const c = await counts(pool, projectId);
   const done = (c.blocked + c.ready + c.running) === 0 && c.failed === 0;
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
-  if (done) reviewSite(pool, projectId).catch(() => {});   // auto visual-QA on completion (fire-and-forget)
+  if (done) {
+    reviewSite(pool, projectId).catch(() => {});            // auto visual-QA (vision model) on completion
+    dogfoodSite(pool, projectId).catch(() => {});           // auto interaction-QA: a real browser uses the site
+  }
   return { stopped: done ? 'complete' : 'blocked', steps };
 }

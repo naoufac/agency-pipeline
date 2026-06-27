@@ -212,6 +212,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, 'application/json', JSON.stringify({ submissions: r.rows }));
     }
 
+    // ---- Interaction QA (dogfood): a real browser used the site; latest verdict ----
+    if (path === '/api/dogfood') {
+      const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const r = await pool.query("select detail, created_at from run_events where project_id=$1 and type='dogfood' order by id desc limit 1", [id]);
+      return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || { detail: null }));
+    }
     // ---- Visual QA: a vision model reads the produced pages + reports issues ----
     if (path === '/api/qa') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');

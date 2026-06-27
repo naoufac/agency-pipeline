@@ -11,12 +11,15 @@
     "serve": "tsx src/server.ts",
     "kpi": "tsx src/kpi-cli.ts",
     "theme:check": "tsx src/theme-check.ts",
+    "dogfood": "tsx src/dogfood-cli.ts",
     "mail:test": "tsx src/mail-cli.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
+    "@types/ws": "^8.18.1",
     "nodemailer": "^9.0.1",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
