@@ -161,7 +161,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
   }
 
@@ -249,65 +249,6 @@ function project(id, tab, seq){
       <div class="kpis">${all.map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
   }
 
-  // ---- EDIT tab: change a page's copy in place, publish through the verified path ----
-  async function editTab(){
-    const body = document.getElementById('pbody');
-    body.innerHTML = `<p class="muted" style="margin:4px 0 14px">Edit the words on any page. <b style="color:var(--text)">Publish</b> rebuilds just that page and only goes live if it passes the same checks — your design never changes, only the text.</p>
-      <div id="edithead"></div><div id="editblocks"></div><div id="editbar"></div>`;
-    const autosize = t => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
-    let data; try { data = await j('/api/pages?id=' + id); } catch { document.getElementById('editblocks').innerHTML = '<div class="empty">Couldn’t load pages.</div>'; return; }
-    const editable = (data.pages || []).filter(p => p.editable);
-    if (!editable.length) { body.innerHTML = `<div class="empty" style="text-align:left"><h3 style="margin-bottom:8px">Editing isn’t enabled for this site yet.</h3><p class="muted">It was built before in-place editing existed. Re-run it (Site → Re-run) and the new build will be editable.</p></div>`; return; }
-    let cur = editable[0].slug;
-    const head = document.getElementById('edithead');
-    function chips(){
-      head.innerHTML = `<div class="pagechips">${editable.map(p => `<button class="chip${p.slug === cur ? ' on' : ''}" data-slug="${p.slug}">${esc(p.title)}${p.drafts ? '<i class="dotpip"></i>' : ''}</button>`).join('')}</div>`;
-      head.querySelectorAll('.chip').forEach(c => c.onclick = () => { cur = c.getAttribute('data-slug'); chips(); loadPage(); });
-    }
-    async function loadPage(){
-      const el = document.getElementById('editblocks');
-      el.innerHTML = `<div class="muted" style="padding:18px 2px">Loading…</div>`;
-      let pg; try { pg = await j(`/api/page?id=${id}&slug=${encodeURIComponent(cur)}`); } catch { el.innerHTML = '<div class="empty">Not editable.</div>'; return; }
-      el.innerHTML = pg.blocks.map(bl => bl.read_only
-        ? `<div class="editor-block ro"><div class="eb-label">${esc(bl.label)} · not editable yet</div><div class="eb-ro">${esc(bl.value)}</div></div>`
-        : `<div class="editor-block"><div class="eb-label">${esc(bl.label)}<span class="eb-saved" data-saved="${bl.block_id}">${bl.edited ? 'edited' : ''}</span></div><textarea class="eb-input" data-bid="${bl.block_id}" rows="1">${esc(bl.value)}</textarea></div>`
-      ).join('') || '<div class="empty">No editable text on this page.</div>';
-      el.querySelectorAll('textarea[data-bid]').forEach(t => {
-        autosize(t); let to;
-        t.addEventListener('input', () => { autosize(t); clearTimeout(to); to = setTimeout(() => saveBlock(t.getAttribute('data-bid'), t.value, t), 700); });
-      });
-    }
-    async function saveBlock(bid, value, t){
-      const tag = t.closest('.editor-block').querySelector(`[data-saved="${bid}"]`);
-      if (tag) { tag.textContent = 'saving…'; tag.classList.remove('err'); }
-      try {
-        const r = await fetch('/api/page/save', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id, slug: cur, blocks: [{ block_id: bid, value }] }) });
-        const jr = await r.json().catch(() => ({}));
-        if (tag) { if (!r.ok) { tag.textContent = jr.error || 'error'; tag.classList.add('err'); } else tag.textContent = 'saved ✓'; }
-      } catch { if (tag) tag.textContent = 'offline'; }
-    }
-    function bar(){
-      const el = document.getElementById('editbar');
-      el.innerHTML = `<div class="editor-actionbar"><span id="editstate" class="muted"></span><button class="btn" id="pubbtn">Publish page</button></div>`;
-      document.getElementById('pubbtn').onclick = publish;
-    }
-    async function publish(){
-      const btn = document.getElementById('pubbtn'), st = document.getElementById('editstate');
-      btn.disabled = true; btn.textContent = 'Publishing…'; st.innerHTML = '';
-      try {
-        const r = await fetch('/api/page/publish', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id, slug: cur }) });
-        if (!r.ok && r.status !== 409) { const e = await r.json().catch(() => ({})); st.innerHTML = `<span class="s-failed">${esc(e.error || 'failed')}</span>`; btn.disabled = false; btn.textContent = 'Publish page'; return; }
-        const t0 = Date.now();
-        const pl = setInterval(async () => {
-          let s; try { s = await j(`/api/page/status?id=${id}&slug=${encodeURIComponent(cur)}`); } catch { return; }
-          if (s.state === 'live') { clearInterval(pl); st.innerHTML = '<span class="s-done">✓ Live</span>'; btn.disabled = false; btn.textContent = 'Publish page'; toast('✓ Page published'); }
-          else if (s.state === 'failed') { clearInterval(pl); st.innerHTML = `<span class="s-failed">✗ ${esc(s.log || 'couldn’t publish')}</span>`; btn.disabled = false; btn.textContent = 'Publish page'; }
-          else if (Date.now() - t0 > 90000) { clearInterval(pl); st.textContent = 'still working…'; btn.disabled = false; btn.textContent = 'Publish page'; }
-        }, 1500);
-      } catch { btn.disabled = false; btn.textContent = 'Publish page'; st.textContent = 'network error'; }
-    }
-    chips(); bar(); loadPage();
-  }
 
   // ---- QA tab: Relay screenshots each page (phone + desktop) and a vision model reviews them ----
   async function qaTab(){
@@ -389,7 +330,6 @@ function project(id, tab, seq){
     else if (tab === 'build') buildTab(b);
     else if (tab === 'files') filesTab(b);
     else if (tab === 'metrics') metricsTab();
-    else if (tab === 'edit') { if (!editInit) { editInit = true; editTab(b); } }
     else if (tab === 'qa') { if (!qaInit) { qaInit = true; qaTab(); } }
     else if (tab === 'data') { if (!dataInit) { dataInit = true; dataTab(); } }
     // resolution moment
@@ -603,7 +543,7 @@ function docsPage(){
     <div class="layer-grid">${infra.map(x=>`<div class="card layer ${x.s}"><span class="lay-badge ${x.s}">${x.s==='ok'?'✓ supervised':'● in progress'}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
 
     <h2 class="rv-h">Data model</h2>
-    <p class="muted" style="margin:6px 0 0;max-width:72ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. The CMS adds <code>page_snapshots</code> + <code>page_blocks</code>; the full-stack layer adds <code>site_submissions</code>; visual QA adds <code>qa_reviews</code> and interaction QA <code>dogfood_reviews</code>. Each app/store project also gets its OWN isolated schema <code>app_&lt;id&gt;</code> holding its real tables — never mixed with the engine’s. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
+    <p class="muted" style="margin:6px 0 0;max-width:72ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. the full-stack layer adds <code>site_submissions</code>; visual QA adds <code>qa_reviews</code> and interaction QA <code>dogfood_reviews</code>. Each app/store project also gets its OWN isolated schema <code>app_&lt;id&gt;</code> holding its real tables — never mixed with the engine’s. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
 
     <h2 class="rv-h">Full written docs</h2>
     <div class="rv-list">
@@ -638,7 +578,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
-  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit','qa','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','qa','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));

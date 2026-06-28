@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
 import { runAgentTracked, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
-import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
@@ -113,7 +112,6 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
   try {
     const ctx = await buildContext(pool, task);
     let content = '';
-    let snapshot: string | null = null;
     const dir = new URL(task.project_id + '/', SITES);
 
     if (task.department === 'render') {
@@ -130,8 +128,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       mkdirSync(fileURLToPath(dir), { recursive: true });
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
       const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
-      snapshot = cms.instrument(await processMedia(rendered, dir));     // real photos -> stamp edit ids for the CMS
-      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
       content = JSON.stringify(page);
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
       await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
@@ -189,8 +186,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           applyBrand(spec, canon);
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
           const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
-          snapshot = cms.instrument(await processMedia(rendered, dir));
-          writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));
+          writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
         } else {
           let body = stripFences(content);
           if (task.artifact.endsWith('.sql')) { try { body = appdb.compileDDL(content).ddl; } catch { body = sqlArtifact(content); } }
@@ -214,11 +210,6 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       }
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
       await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
-      // freeze the editable snapshot + blocks for the CMS (rendered/built pages only, never a republish)
-      if (snapshot && task.artifact && !task.source) {
-        try { await cms.syncBlocks(pool, task.project_id, task.artifact.replace(/\.html$/, ''), task.artifact, snapshot); }
-        catch (e: any) { console.error('cms syncBlocks', e?.message ?? e); }
-      }
     } else {
       await ev(pool, task.project_id, task.id, 'verify_failed', `#${task.seq}: ${log}`);
       const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';

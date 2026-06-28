@@ -8,7 +8,6 @@ import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
-import { republishPage } from './cms.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 
@@ -32,7 +31,6 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
 }
 const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
-const publishLimited = (ip: string) => limited(PUB_HITS, PUB_MAX_PER_IP, ip); // /api/page/publish: cheap + frequent during editing
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
 const readLimited = (ip: string) => limited(READ_HITS, Number(process.env.READ_MAX || 240), ip); // public content reads (feed/collection) — generous; just caps bulk harvesting
@@ -120,59 +118,6 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || {}));
     }
 
-    // ---- CMS (roadmap 08): edit content + re-publish a single page ----
-    if (path === '/api/pages') {
-      const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
-      const proj = await pool.query('select params from projects where id=$1', [id]);
-      const pages = (proj.rows[0]?.params?.pages) || [];
-      const snaps = (await pool.query('select slug, state from page_snapshots where project_id=$1', [id])).rows;
-      const drafts = (await pool.query('select slug, count(*)::int n from page_blocks where project_id=$1 and draft is not null group by slug', [id])).rows;
-      const sMap = new Map(snaps.map((s: any) => [s.slug, s.state])), dMap = new Map(drafts.map((d: any) => [d.slug, d.n]));
-      const out = pages.map((p: any) => ({ slug: p.slug, title: p.title, editable: sMap.has(p.slug), state: sMap.get(p.slug) || null, drafts: dMap.get(p.slug) || 0 }));
-      return send(res, 200, 'application/json', JSON.stringify({ pages: out }));
-    }
-    if (path === '/api/page') {
-      const id = url.searchParams.get('id'), slug = url.searchParams.get('slug');
-      if (!id || !slug) return send(res, 400, 'application/json', '{"error":"id+slug required"}');
-      const snap = (await pool.query('select state, log from page_snapshots where project_id=$1 and slug=$2', [id, slug])).rows[0];
-      if (!snap) return send(res, 404, 'application/json', '{"error":"page not editable yet — rebuild to enable"}');
-      const blocks = (await pool.query("select block_id, kind, label, seq, coalesce(draft,published) as value, (draft is not null) as edited, read_only from page_blocks where project_id=$1 and slug=$2 order by seq", [id, slug])).rows;
-      return send(res, 200, 'application/json', JSON.stringify({ page: { slug, state: snap.state, log: snap.log }, blocks }));
-    }
-    if (path === '/api/page/status') {
-      const id = url.searchParams.get('id'), slug = url.searchParams.get('slug');
-      const snap = (await pool.query('select state, log from page_snapshots where project_id=$1 and slug=$2', [id, slug])).rows[0];
-      return send(res, 200, 'application/json', JSON.stringify(snap || { state: null }));
-    }
-    if (path === '/api/page/save' && req.method === 'POST') {
-      let raw = ''; for await (const c of req) raw += c;
-      let body: any = {}; try { body = JSON.parse(raw || '{}'); } catch {}
-      const { id, slug, blocks } = body;
-      if (!id || !slug || !Array.isArray(blocks)) return send(res, 400, 'application/json', '{"error":"id, slug, blocks[] required"}');
-      for (const b of blocks) {
-        const v = String(b.value ?? '');
-        if (!v.trim()) return send(res, 400, 'application/json', JSON.stringify({ error: 'text can’t be empty' }));
-        if (/https?:\/\//i.test(v)) return send(res, 400, 'application/json', JSON.stringify({ error: 'links/URLs aren’t allowed in page copy' }));
-        await pool.query('update page_blocks set draft=$3, updated_at=now() where project_id=$1 and slug=$2 and block_id=$4 and read_only=false', [id, slug, v, b.block_id]);
-      }
-      await pool.query("update page_snapshots set state='editing', updated_at=now() where project_id=$1 and slug=$2 and state<>'publishing'", [id, slug]);
-      return send(res, 200, 'application/json', '{"ok":true}');
-    }
-    if (path === '/api/page/publish' && req.method === 'POST') {
-      let raw = ''; for await (const c of req) raw += c;
-      let body: any = {}; try { body = JSON.parse(raw || '{}'); } catch {}
-      const { id, slug } = body;
-      if (!id || !slug) return send(res, 400, 'application/json', '{"error":"id+slug required"}');
-      const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
-      if (publishLimited(ip)) return send(res, 429, 'application/json', '{"error":"too many publishes — try again shortly"}');
-      const snap = (await pool.query('select state from page_snapshots where project_id=$1 and slug=$2', [id, slug])).rows[0];
-      if (!snap) return send(res, 404, 'application/json', '{"error":"page not editable"}');
-      // atomic claim — only ONE concurrent publish per page wins (no SELECT-then-UPDATE TOCTOU)
-      const claim = await pool.query("update page_snapshots set state='publishing', updated_at=now() where project_id=$1 and slug=$2 and state<>'publishing' returning id", [id, slug]);
-      if (!claim.rowCount) return send(res, 409, 'application/json', '{"error":"already publishing"}');
-      republishPage(pool, id, slug).catch((e) => console.error('republish', id, slug, e?.message));   // fire-and-forget; status polled
-      return send(res, 202, 'application/json', '{"ok":true,"state":"publishing"}');
-    }
 
     // ---- Full-stack: a produced site's form posts here -> Postgres ----
     const submitM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/submit$/i);
@@ -297,9 +242,6 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 // no lease). Release it so the page stays editable. Runs on boot + every 2 min.
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
 pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
-const reclaimPublishing = () => pool.query("update page_snapshots set state='failed', log='publish interrupted — please retry', updated_at=now() where state='publishing' and updated_at < now() - interval '5 minutes'").catch(() => {});
-reclaimPublishing();
-setInterval(reclaimPublishing, 120000).unref?.();
 
 // AUTONOMOUS BUILD RECOVERY (0-human): re-run any 'blocked' project that still has failed tasks AND resurrect
 // budget left, so a build that got stuck while the server kept running heals itself — no restart, no human.

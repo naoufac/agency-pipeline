@@ -114,4 +114,9 @@ An agent cannot self-report it; static HTML cannot pass it.
 - ✅ Selector (`src/cms/select.ts`) — implemented + **proven** (`npm run cms:check`).
 - ✅ Pipeline hook — `planner.ts` records `params.cms` on every new project (typechecked; live-DB
   confirmation lands with the first real CMS build).
-- ⏳ Adapters (Directus → … → Craft), `served_from_cms` gate, `cms.ts` removal — **not built yet.**
+- ✅ `src/cms.ts` **removed** — the string-overlay editor is gone: the runner writes the rendered
+  page directly, the `/api/page*` editor routes + the board **Edit tab** are deleted, `cms.ts` is
+  deleted. tsc 0 diagnostics; app.js parses; 0 editor refs left. (DB tables
+  `page_snapshots`/`page_blocks` left inert for now; dropped in a migration when the CMS edit path
+  lands, to avoid an irreversible drop on the shared prod DB mid-feature.)
+- ⏳ Adapters (Directus → … → Craft) + the `served_from_cms` gate — **not built yet.**
