@@ -3,7 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent } from './spec.ts';
+import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
@@ -211,6 +211,36 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
 {
   const r = normalizeContent('{"sections":[{"id":"hero","title":"Home"');
   ok('normContent: truncated/no-closing → rejected', r.ok === false && r.errors.length > 0);
+}
+
+// ---- DATABASE data-model normaliser (R7): recover the model, clamp INT4 overflow, reject the unfixable ----
+// 1) a clean single object with entities[] → passes untouched (fenced, exactly like a real database reply)
+{
+  const r = normalizeDataModel('```json\n{"entities":[{"name":"products","fields":[{"name":"title","type":"text","required":true}],"seed":[{"title":"Widget","stock":5}]}]}\n```');
+  ok('normDataModel: valid entities → ok', r.ok === true && Array.isArray(r.model.entities) && r.model.entities[0].name === 'products');
+  ok('normDataModel: valid → no repairs', r.ok === true && r.repairs.length === 0);
+}
+// 2) two concatenated objects (the model block + a trailing stray) → first complete object with entities extracted
+{
+  const r = normalizeDataModel('{"entities":[{"name":"roles","seed":[{"name":"Navigator"}]}]}\n{"_note":"that was the model"}');
+  ok('normDataModel: concatenated → entities extracted', r.ok === true && r.model.entities[0].name === 'roles');
+}
+// 3) model emitted `tables:[...]` instead of `entities:[...]` → coerced
+{
+  const r = normalizeDataModel('{"tables":[{"name":"items","fields":[{"name":"label","type":"text"}],"seed":[{"label":"A"}]}]}');
+  ok('normDataModel: tables → entities coerced', r.ok === true && Array.isArray(r.model.entities) && r.model.entities[0].name === 'items');
+  ok('normDataModel: coercion recorded', r.ok === true && r.repairs.some(x => /coerced/.test(x)));
+}
+// 4) truncated JSON (ran out of tokens mid-seed, the real "no tables" cause) → rejected into retry-with-feedback
+{
+  const r = normalizeDataModel('{"entities":[{"name":"characters","seed":[{"name":"Blackbeard","bounty":3989000000,"description":"The man who');
+  ok('normDataModel: truncated → rejected', r.ok === false && r.errors.length > 0);
+}
+// 5) a seed integer over PG INT4 (a real One Piece bounty) → clamped into range + repair logged
+{
+  const r = normalizeDataModel('{"entities":[{"name":"characters","seed":[{"name":"Kaido","bounty":4611100000}]}]}');
+  ok('normDataModel: int4 overflow clamped', r.ok === true && r.model.entities[0].seed[0].bounty <= 2147483647);
+  ok('normDataModel: clamp recorded as repair', r.ok === true && r.repairs.some(x => /clamp/i.test(x)));
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

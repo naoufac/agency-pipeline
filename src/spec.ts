@@ -66,6 +66,67 @@ export function normalizeContent(raw: string): ContentResult {
   return { ok: false, errors };
 }
 
+// DATABASE-dept normaliser (R7): the database role emits a JSON DATA MODEL {entities:[{name,fields,seed}]}
+// that appdb.provision() COMPILES into real Postgres. Two recurring model defects break provisioning, and
+// the autopsy (a94d539a) shows BOTH in the same project across retries:
+//   - "appdb: no tables in the data model" — the JSON is truncated / fenced / emitted as TWO concatenated
+//     blocks, so schema.parseModel (indexOf{ .. lastIndexOf}) can't parse it -> no entities[] -> no DDL.
+//   - "integer out of range" — a seed integer (e.g. a One Piece bounty 3_989_000_000) exceeds PG INT4.
+// normalizeDataModel recovers the model (string-aware first object, then a tables->entities coercion, then
+// a concatenated-blocks fallback) and CLAMPS oversized seed integers into INT4 range, or REJECTS the
+// unfixable (truncated) into the existing retry-with-feedback loop. Same shape as normalizeContent (R3).
+export type DataModelResult = { ok: true; model: any; repairs: string[] } | { ok: false; errors: string[] };
+export function normalizeDataModel(raw: string): DataModelResult {
+  const repairs: string[] = []; const errors: string[] = [];
+  if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
+  // first pass: the FIRST complete, balanced JSON object (string-aware; survives fences + a trailing block).
+  const first = extractFirstJson(raw);
+  if (first && Array.isArray(first.entities)) return { ok: true, model: clampSeedPks(first, repairs), repairs };
+  // first pass (coercion): the model used `tables:[...]` instead of `entities:[...]` — extractFirstJson
+  // parses nested objects the regex fallback below cannot, so coerce here too.
+  if (first && Array.isArray(first.tables)) {
+    repairs.push('coerced: tables → entities');
+    return { ok: true, model: clampSeedPks({ ...first, entities: first.tables }, repairs), repairs };
+  }
+  // second pass: scan top-level blocks and take the first that carries a real model (concatenated output).
+  const blocks: any[] = [];
+  const re = /\{[^{}]*\}/g;
+  let m; while ((m = re.exec(raw)) !== null) { try { blocks.push(JSON.parse(m[0])); } catch {} }
+  const withEntities = blocks.find(b => b && Array.isArray(b.entities));
+  if (withEntities) {
+    repairs.push('merged: extracted entities from concatenated blocks');
+    return { ok: true, model: clampSeedPks(withEntities, repairs), repairs };
+  }
+  // third pass: a concatenated block that used `tables:[...]` instead of `entities:[...]`.
+  const withTables = blocks.find(b => b && Array.isArray(b.tables));
+  if (withTables) {
+    repairs.push('coerced: tables → entities');
+    return { ok: true, model: clampSeedPks({ ...withTables, entities: withTables.tables }, repairs), repairs };
+  }
+  errors.push('database output has no entities[] or coercible tables[]');
+  return { ok: false, errors };
+}
+
+// CLAMP every seed integer into PostgreSQL INT4 range (max 2,147,483,647) so a giant real-world value (a
+// bounty, a population) can't fail provisioning with "integer out of range". Floats (money/prices) are
+// left untouched. Each clamp is recorded as a repair so the runner can log what it changed.
+const INT4_MAX = 2_147_483_647;
+function clampSeedPks(model: any, repairs: string[] = []): any {
+  for (const e of model.entities || []) {
+    for (const s of e.seed || []) {
+      if (!s || typeof s !== 'object') continue;
+      for (const k of Object.keys(s)) {
+        const v = s[k];
+        if (typeof v === 'number' && Number.isInteger(v) && v > INT4_MAX) {
+          s[k] = Math.floor(v % INT4_MAX);
+          repairs.push(`clamped seed ${e.name ?? '?'}.${k} ${v} → ${s[k]} (int4)`);
+        }
+      }
+    }
+  }
+  return model;
+}
+
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
 const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;

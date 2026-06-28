@@ -8,7 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec, normalizeContent, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
+import { normalizeSpec, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -102,6 +102,18 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       if (r.ok === false) throw new Error('content rejected: ' + r.errors.join('; '));
       for (const rep of r.repairs) console.error(`[content] ${task.project_id}: ${rep}`);
       content = JSON.stringify(r.spec);  // feed normalized JSON to next stage
+    }
+
+    // DATABASE-dept reliability gate (R7): the database role emits a JSON DATA MODEL that appdb.provision()
+    // compiles into real Postgres. Models truncate / fence / emit `tables` instead of `entities` (-> "no
+    // tables in the data model") and seed real-world integers that blow PG INT4 (-> "integer out of range").
+    // Normalize + CLAMP into ONE clean model BEFORE we store it (clean JSON downstream) and BEFORE verify
+    // (so app_db provision parses + seeds it), or REJECT the unfixable into the existing retry-with-feedback loop.
+    if (task.department === 'database') {
+      const r = normalizeDataModel(content);
+      if (r.ok === false) throw new Error('database rejected: ' + r.errors.join('; '));
+      for (const rep of r.repairs) console.error(`[datamodel] ${task.project_id}: ${rep}`);
+      content = JSON.stringify(r.model);
     }
 
     await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
