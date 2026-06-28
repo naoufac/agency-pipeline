@@ -100,7 +100,8 @@ function validate(plan: any, brief: string): Plan | null {
 }
 
 async function llmPlan(brief: string): Promise<Plan | null> {
-  let raw = ''; try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 2000); } catch { return null; }
+  // web:true — ground the plan in the REAL domain (live competitors/positioning/conventions), not just training data.
+  let raw = ''; try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 4000, { web: true }); } catch { return null; }
   if (!raw.trim()) return null;
   const txt = raw.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
   const s = txt.indexOf('{'), e = txt.lastIndexOf('}'); if (s < 0 || e <= s) return null;

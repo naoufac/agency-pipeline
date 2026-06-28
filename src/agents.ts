@@ -1,13 +1,26 @@
 // A working agent is JUST AN API CALL: context in -> text/artifact out.
-// Live provider: MiniMax (OpenAI-compatible /chat/completions). If MINIMAX_API_KEY is
-// unset, falls back to deterministic STUBS so the engine still runs end-to-end offline.
-//   MINIMAX_API_KEY   – required for live calls
-//   MINIMAX_BASE_URL  – default https://api.minimax.io/v1   (or https://api.minimaxi.com/v1)
-//   MINIMAX_MODEL     – default MiniMax-M2  (set to whatever your key supports, e.g. MiniMax-Text-01)
+// Live provider (preferred): OpenRouter (OpenAI-compatible) pinned to a MiniMax REASONING model, with
+// OpenRouter's server-side WEB SEARCH plugin turned on for the research/strategy/planning calls — so
+// those agents are grounded in REAL, cited facts within a SINGLE call (the one-call-per-agent rule is
+// preserved; OpenRouter runs the search and folds results into the same completion). MiniMax's
+// chain-of-thought returns in a SEPARATE `reasoning` field, so `content` stays clean — no <think> leak.
+// Downstream JSON agents (content/copy/build/database) inherit the grounded facts via the DAG, so they
+// stay strict-JSON and we pay for search only on the research phase.
+// Fallbacks: MiniMax-direct (no web), then deterministic STUBS (no key) so the engine runs offline.
+//   OPENROUTER_API_KEY   – preferred. OPENROUTER_MODEL (default minimax/minimax-m2.7, MiniMax-only).
+//   OPENROUTER_BASE_URL  – default https://openrouter.ai/api/v1 ;  WEB_MAX_RESULTS (default 5).
+//   MINIMAX_API_KEY / MINIMAX_BASE_URL / MINIMAX_MODEL – legacy direct fallback.
 
+const OR_KEY = process.env.OPENROUTER_API_KEY;
+const OR_BASE = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+const OR_MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.7'; // MiniMax-only, has reasoning
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
-const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M2 emits <think> tags
+const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
+const LIVE = !!(OR_KEY || KEY);   // any live provider configured?
+// departments whose output is improved by REAL-WORLD facts -> enable web search (grounding). Everything
+// else inherits those facts through upstream context, so search cost is ~2 calls/project.
+const WEB_DEPTS = new Set(['research', 'strategy']);
 
 import { themeFor, themeTone } from './themes.ts';
 
@@ -72,16 +85,37 @@ function buildUser(ctx: Ctx): string {
   return s;
 }
 
-async function callMiniMax(system: string, user: string, maxTokens = 1500): Promise<string> {
+// the single live call. Prefer OpenRouter (MiniMax + optional web search); else MiniMax-direct.
+async function callLLM(system: string, user: string, maxTokens: number, web: boolean): Promise<string> {
+  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  if (OR_KEY) {
+    const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
+    // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
+    if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
+    const res = await fetch(`${OR_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OR_KEY}`, 'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data: any = await res.json();
+    const text = data?.choices?.[0]?.message?.content;  // reasoning lands in a separate field; content is clean
+    if (!text || !String(text).trim()) {
+      const fin = data?.choices?.[0]?.finish_reason;
+      throw new Error(fin === 'length'
+        ? 'OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)'
+        : 'OpenRouter: empty response ' + JSON.stringify(data).slice(0, 200));
+    }
+    return String(text);
+  }
+  // legacy MiniMax-direct (no web search)
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      temperature: 0.7,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
   });
   if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data: any = await res.json();
@@ -90,15 +124,18 @@ async function callMiniMax(system: string, user: string, maxTokens = 1500): Prom
   return String(text);
 }
 
-// generic MiniMax text call (used by the planner); '' when no key so callers fall back
-export async function llm(system: string, user: string, maxTokens = 2000): Promise<string> {
-  return KEY ? callMiniMax(system, user, maxTokens) : '';
+// generic text call (used by the planner); '' when no provider so callers fall back. opts.web = ground in live web search.
+export async function llm(system: string, user: string, maxTokens = 3000, opts: { web?: boolean } = {}): Promise<string> {
+  return LIVE ? callLLM(system, user, maxTokens, !!opts.web) : '';
 }
 
 export async function runAgent(department: string, ctx: Ctx): Promise<string> {
-  if (KEY) {
+  if (LIVE) {
     const system = ROLE[department] || `You are the ${department} department of an automated agency. Do your part for the brief.`;
-    return await callMiniMax(system, buildUser(ctx), department === 'build' ? 8000 : 1500);
+    const web = WEB_DEPTS.has(department);
+    // reasoning models need headroom; build emits a large spec; web calls synthesize search results.
+    const maxTokens = department === 'build' ? 8000 : (web ? 4000 : 3000);
+    return await callLLM(system, buildUser(ctx), maxTokens, web);
   }
   return stub(department, ctx.brief);
 }
