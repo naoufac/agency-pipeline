@@ -2,6 +2,7 @@
 // Feeds malformed/edge specs through normalizeSpec and asserts the right repair/reject outcome.
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
+import { copySlop } from './verify.ts';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => { if (cond) { pass++; } else { fail++; console.error(`  ✗ ${name} ${extra}`); } };
@@ -84,6 +85,21 @@ const hero = (h = 'Welcome') => ({ type: 'hero', headline: h });
   ok('form kept', !!f);
   ok('bogus form table dropped', f && f.table === undefined);
 }
+
+// ---- copy-specificity floor (R3): copySlop must catch template slop AND pass real copy ----
+// rejects (each returns a reason):
+ok('slop: lorem ipsum', !!copySlop('<h1>Lorem ipsum dolor sit amet</h1>'));
+ok('slop: your tagline here', !!copySlop('<p>Your tagline here</p>'));
+ok('slop: headline goes here', !!copySlop('<h2>Headline goes here</h2>'));
+ok('slop: insert your text here', !!copySlop('<p>Insert your text here</p>'));
+ok('slop: mustache token', !!copySlop('<h1>Welcome to {{company}}</h1>'));
+ok('slop: TODO', !!copySlop('<p>TODO: write the about copy</p>'));
+ok('slop: example.com email', !!copySlop('<a href="mailto:hi@example.com">hi@example.com</a>'));
+ok('slop ignores CSS/JS', copySlop('<style>.x{content:"lorem ipsum"}</style><script>var t="tbd todo"</script><h1>Stone-fired pizza in Porto</h1>') === null);
+// PASSES — real, specific copy must NEVER false-fail (false positives cause build loops):
+ok('real copy passes #1', copySlop('<h1>Lisboa Roasters — single-origin coffee roasted in Alfama</h1><p>Order online, pick up in store.</p>') === null);
+ok('real copy passes #2', copySlop('<h2>Book a table</h2><p>Open Tue–Sun, 6pm till late. For example, our tasting menu changes weekly.</p>') === null);
+ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing here yet — be the first to add one.</p>') === null);
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

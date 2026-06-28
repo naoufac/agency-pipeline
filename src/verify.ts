@@ -29,6 +29,25 @@ function contrast(a: string, b: string) { const L1 = lum(rgb(a)), L2 = lum(rgb(b
 //   nonempty · contains:<s> · min:<n>            (weak floors)
 //   json · json:k1,k2 · wcag                      (real: structured output the build consumes)
 //   sql_applies · site_renders                    (real: actually runs/renders)
+// copy-specificity floor (R3): scan VISIBLE text for UNAMBIGUOUS template slop and return a reason
+// (else null). High-precision by design — every pattern is template residue that never appears in real
+// marketing copy, so it can't false-fail genuine writing. Pure + exported so it's unit-tested (spec:check).
+export function copySlop(html: string): string | null {
+  const visible = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
+  const SLOP: [RegExp, string][] = [
+    [/lorem ipsum|dolor sit amet/i, 'lorem ipsum filler'],
+    [/\byour (tagline|headline|sub-?headline|company|business|brand|slogan|name|text|content|product|service)s? here\b/i, '"your … here" placeholder'],
+    [/\b(tagline|headline|sub-?headline|content|copy|description|text|name|slogan)s? goes? here\b/i, '"… goes here" placeholder'],
+    [/\b(insert|add|enter|type) (your |the )?(tagline|headline|name|text|content|copy|description|details|logo)\b[^.]{0,16}\bhere\b/i, '"insert … here" placeholder'],
+    [/\{\{\s*[\w.]+\s*\}\}/, 'unrendered template token ({{…}})'],
+    [/\b(todo|tbd|fixme)\b/i, 'TODO/TBD left in copy'],
+    [/@example\.(com|org|net)\b/i, 'placeholder example.com email'],
+    [/\bexample\.(com|org)\b/i, 'placeholder example.com link'],
+  ];
+  for (const [re, why] of SLOP) { const m = visible.match(re); if (m) return `${why}: "${m[0].trim().slice(0, 40)}"`; }
+  return null;
+}
+
 export async function verify(pool: pg.Pool, task: any, content: string): Promise<{ ok: boolean; log: string }> {
   const rule: string = task.verify;
 
@@ -94,6 +113,8 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
       return { ok: false, log: 'broken: external/unbundled asset reference — all CSS/fonts must be inlined' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };
+    const slop = copySlop(raw);
+    if (slop) return { ok: false, log: `slop copy — ${slop}. Write real, specific copy for this brief.` };
     // INTERACTION: a button that goes nowhere is a defect. Every CTA must have a real target
     // (a page or an in-page anchor), and every form must be wired to submit.
     const dead = (raw.match(/<a\b[^>]*class="btn"[^>]*>/gi) || []).filter(b => !/href="/i.test(b) || /href="#"/i.test(b) || /href=""/i.test(b)).length;
