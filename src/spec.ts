@@ -11,6 +11,24 @@
 export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string };
 export type SpecResult = { spec: any; repairs: string[]; errors: string[] };
 
+// Extract the FIRST complete JSON object from an agent's text. STRING-AWARE: braces inside string
+// values (and escaped quotes) don't desync the matcher — the old naive counter mis-parsed any copy
+// containing a "{" or "}". Returns null if no balanced object parses (e.g. a truncated reply).
+export function extractFirstJson(s: string): any {
+  if (!s) return null;
+  const t = s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
+  const a = t.indexOf('{'); if (a < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = a; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { if (--depth === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } }
+  }
+  return null;
+}
+
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
 const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;

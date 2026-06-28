@@ -10,7 +10,7 @@
 //   npm run eval -- 15      # the full corpus
 import { buildPlan } from './planner.ts';
 import { runAgent } from './agents.ts';
-import { normalizeSpec } from './spec.ts';
+import { normalizeSpec, extractFirstJson } from './spec.ts';
 import { renderPage } from './render.ts';
 import { copySlop } from './verify.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -48,15 +48,6 @@ function visibleText(html: string): string {
   return html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// brace-balanced first JSON object (mirrors runner.firstSpec — the build agent returns a spec as text)
-function firstSpec(s: string): any {
-  const t = s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
-  const a = t.indexOf('{'); if (a < 0) return null;
-  let d = 0;
-  for (let i = a; i < t.length; i++) { if (t[i] === '{') d++; else if (t[i] === '}') { if (--d === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } } }
-  return null;
-}
-
 // PURE scorer (exported, unit-tested in spec-test.ts) — objective signals, no model opinion.
 export function scorePage(html: string, spec: any) {
   const text = visibleText(html);
@@ -87,8 +78,8 @@ async function evalBrief(brief: string) {
     const rec: any = { slug: pg.slug };
     try {
       const rawTxt = await runAgent('build', { brief, upstream, self: { title: pg.title, slug: pg.slug }, pages, theme: plan.theme, tables: [], forms: {}, primaryTable: '' } as any);
-      const { spec, errors } = normalizeSpec(firstSpec(rawTxt), { slug: pg.slug });
-      if (errors.length) rec.rejected = errors.join('; ');
+      const { spec, errors } = normalizeSpec(extractFirstJson(rawTxt), { slug: pg.slug });
+      if (errors.length) { rec.rejected = errors.join('; '); rec.rawLen = rawTxt.length; rec.rawTail = rawTxt.slice(-80); }
       else Object.assign(rec, scorePage(renderPage(spec, { pages, slug: pg.slug, title: pg.title, theme: plan.theme }), spec));
     } catch (e: any) { rec.error = (e?.message || String(e)).slice(0, 140); }
     pageScores.push(rec);

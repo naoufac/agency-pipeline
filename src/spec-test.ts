@@ -2,7 +2,8 @@
 // Feeds malformed/edge specs through normalizeSpec and asserts the right repair/reject outcome.
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
-import { copySlop } from './verify.ts';
+import { copySlop, } from './verify.ts';
+import { extractFirstJson } from './spec.ts';
 import { scorePage } from './eval.ts';
 
 let pass = 0, fail = 0;
@@ -86,6 +87,15 @@ const hero = (h = 'Welcome') => ({ type: 'hero', headline: h });
   ok('form kept', !!f);
   ok('bogus form table dropped', f && f.table === undefined);
 }
+
+// ---- robust JSON extractor: string-aware (braces inside strings must NOT desync) ----
+ok('json: clean object', JSON.stringify(extractFirstJson('{"a":1,"b":[1,2]}')) === '{"a":1,"b":[1,2]}');
+ok('json: braces INSIDE a string value', (extractFirstJson('{"copy":"use {curly} and } here","ok":true}') || {}).ok === true);
+ok('json: escaped quote in string', (extractFirstJson('{"q":"a \\" brace } inside","n":2}') || {}).n === 2);
+ok('json: strips ``` fences', (extractFirstJson('```json\n{"x":5}\n```') || {}).x === 5);
+ok('json: leading prose then object', (extractFirstJson('Here you go: {"y":7} done') || {}).y === 7);
+ok('json: truncated/unbalanced → null', extractFirstJson('{"a":1,"b":{"c":2') === null);
+ok('json: empty/no-brace → null', extractFirstJson('no json here') === null && extractFirstJson('') === null);
 
 // ---- copy-specificity floor (R3): copySlop must catch template slop AND pass real copy ----
 // rejects (each returns a reason):

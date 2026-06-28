@@ -93,6 +93,10 @@ async function callLLM(system: string, user: string, maxTokens: number, web: boo
     const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
     // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
     if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
+    // structured/JSON agents (build, content, …) don't need deep chain-of-thought: cap reasoning so it
+    // can't eat the token budget and truncate the JSON spec (the cause of intermittent parse failures),
+    // and so builds run faster/cheaper. Web/analytical agents keep full reasoning.
+    else body.reasoning = { effort: 'low' };
     const res = await fetch(`${OR_BASE}/chat/completions`, {
       method: 'POST',
       headers: {

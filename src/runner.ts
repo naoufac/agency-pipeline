@@ -8,25 +8,13 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec } from './spec.ts';
+import { normalizeSpec, extractFirstJson } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
 const stripFences = (s: string) => s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
 // a real .sql deliverable: drop any prose preamble, keep from the first CREATE TABLE (mirrors sql_applies)
 function sqlArtifact(content: string): string { const s = stripFences(content); const at = s.search(/create\s+table/i); return at >= 0 ? s.slice(at) : s; }
-
-// parse the FIRST brace-balanced JSON object from the build agent's spec output
-function firstSpec(s: string): any {
-  const t = s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
-  const a = t.indexOf('{'); if (a < 0) return null;
-  let d = 0;
-  for (let i = a; i < t.length; i++) {
-    if (t[i] === '{') d++;
-    else if (t[i] === '}') { if (--d === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } }
-  }
-  return null;
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -103,7 +91,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       if (task.artifact.endsWith('.html')) {
         // PAGE: the agent returns a SPEC; the BUILD-SPEC CONTRACT (src/spec.ts) validates/normalizes/repairs
         // it (or REJECTS the unfixable back into retry-with-feedback), then a deterministic renderer builds the page.
-        const raw = firstSpec(content);
+        const raw = extractFirstJson(content);
         const slug = task.artifact.replace(/\.html$/, '');
         const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
