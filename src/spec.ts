@@ -24,7 +24,14 @@ export function extractFirstJson(s: string): any {
     if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
     if (c === '"') inStr = true;
     else if (c === '{') depth++;
-    else if (c === '}') { if (--depth === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } }
+    else if (c === '}') {
+      if (--depth === 0) {
+        const slice = t.slice(a, i + 1);
+        try { return JSON.parse(slice); } catch { /* fall through to lenient repair */ }
+        // common LLM defects that strict JSON rejects: JS-style escaped apostrophe (\') and trailing commas.
+        try { return JSON.parse(slice.replace(/\\'/g, "'").replace(/,(\s*[}\]])/g, '$1')); } catch { return null; }
+      }
+    }
   }
   return null;
 }
