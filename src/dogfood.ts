@@ -152,9 +152,16 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
   return { issues, checked: { pages: pages.length, buttons: nButtons, links: nLinks, linkTargets: targets.size, forms: nForms, collections: nColls } };
 }
 
-// Auto-run on project completion (fire-and-forget). Only when an HTTP server is actually serving the
-// site (skips offline CLI/demo runs). Records an honest summary as a run_event the dashboard can show.
-export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:' + (process.env.PORT || 8787)): Promise<void> {
+// Auto-run on project completion (fire-and-forget). SERIALIZED: a burst of completions (e.g. several
+// concurrent builds finishing together) must NOT launch N headless chromium at once — that loses the
+// CDP-startup race and most reviews fail ("chromium CDP did not come up"). One review (one browser) runs
+// at a time via this queue, so every finished site is actually reviewed.
+let __dogQueue: Promise<any> = Promise.resolve();
+export function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl?: string): Promise<void> {
+  __dogQueue = __dogQueue.then(() => _dogfoodSite(pool, projectId, baseUrl)).catch(() => {});
+  return __dogQueue;
+}
+async function _dogfoodSite(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:' + (process.env.PORT || 8787)): Promise<void> {
   try { const h = await fetch(baseUrl + '/healthz'); if (!h.ok) return; } catch { return; }
   try {
     const { issues, checked } = await dogfood(pool, projectId, baseUrl);
