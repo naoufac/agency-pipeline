@@ -421,9 +421,10 @@ function roadmap(){
     { n:'09', t:'Rooted identity', s:'done', d:'Every brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape — so the same copy yields genuinely different studios, never one template wearing new colours.' },
     { n:'10', t:'Full-stack + database', s:'done', d:'The core mission, live: an app or store brief gets a REAL, isolated Postgres schema — designed as a typed data model, compiled into flawless DDL (keys, relations, indexes, seeds), and read back on the page. Not static HTML.' },
     { n:'11', t:'Interaction QA', s:'done', d:'A real browser then uses every finished site — clicks every button, types into and submits the form, checks the data came through, measures the layout on phone + desktop. Verification by interaction, not just a screenshot. The verdict shows on each project.' },
-    { n:'12', t:'Editable CMS', s:'progress', d:'In-place text editing → re-publish through the verified path works end to end. Next: edit the structured spec directly (blocks = component instances).' },
-    { n:'13', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
-    { n:'14', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, an auth department, and safe migrations when a rebuild changes the model.' },
+    { n:'12', t:'Editable CMS', s:'done', d:'In-place text editing → re-publish through the verified path works end to end. Pages are frozen as editable snapshots; an edit is a pure string overlay (no LLM, design can\'t drift); republish runs the identical site_renders gate and atomically swaps live on pass. Next: edit the structured spec directly (blocks = component instances).' },
+    { n:'13', t:'Robust browser layer', s:'done', d:'Killed spawn-per-call chromium + hand-rolled CDP-over-ws (the source of recurring "chromium didn\'t come up" breakage) → ONE persistent Playwright browser (src/browser.ts, Playwright\'s own Chromium, context-per-call, concurrency-gated) behind every browser path. Removed the redundant screenshot from the verify hot path (site_renders is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in worker process (src/worker.ts, RELAY_BUILD=0 flag) for horizontal build scale.' },
+    { n:'14', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
+    { n:'15', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, an auth department, and safe migrations when a rebuild changes the model.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -452,8 +453,8 @@ function about(){
     <div class="steps">
       <div class="step"><div><b>1 · Plan</b><span class="muted">It reads your brief and breaks it into steps with dependencies.</span></div></div>
       <div class="step"><div><b>2 · Build, stage by stage</b><span class="muted">Independent steps run in parallel; dependent ones wait their turn.</span></div></div>
-      <div class="step"><div><b>3 · Verify, never trust</b><span class="muted">A step is only “done” when a real check passes — the site actually renders.</span></div></div>
-      <div class="step"><div><b>4 · Ship</b><span class="muted">A real website you can open and share.</span></div></div>
+      <div class="step"><div><b>3 · Verify, never trust</b><span class="muted">A step is only “done” when a deterministic check passes — structural HTML, real assets, and working links.</span></div></div>
+      <div class="step"><div><b>4 · Ship</b><span class="muted">A real, full-featured website — or app with a live database — verified by a real browser clicking every link, submitting the form, and checking the data persists.</span></div></div>
     </div>
     <p style="margin-top:32px"><a class="btn" href="#/">Build my first site →</a></p>
   </div></div>`;
@@ -476,10 +477,10 @@ function review(){
     { g:'done', sev:'high', t:'Single ingress for all hostnames', v:'Every naples.agency hostname rode one shared cloudflared tunnel — a single failure domain for Relay and the other tenants. (Your point — correct.)', fix:'Relay now has its OWN dedicated, supervised tunnel (Restart=always, crash-tested: respawn in 2s). board/api/email re-pointed onto it; the shared tunnel no longer routes them. Fully decoupled.' },
     { g:'defer', sev:'high', t:'Destructive schema bootstrap', v:'db/schema.sql opens with unconditional DROP TABLE … CASCADE and the server never applies it on boot — a fresh DB 500s, and run.ts/demo.ts drop already-shipped work.', fix:'Move to CREATE … IF NOT EXISTS, apply at boot before listen(), gate the reset behind RESET=1, add a numbered migrations/ dir.' },
     { g:'defer', sev:'high', t:'Stub mode still serves', v:'The new boot banner warns, but with no key Relay still serves stub sites that pass every gate.', fix:'Hard-exit in production, or badge the project as “stub” in the UI + KPI so it can never be mistaken for real work.' },
-    { g:'defer', sev:'medium', t:'Scheduler pool exhaustion', v:'A global claim() + one runLoop per project, all tagged runnerId=runner-1; three concurrent projects can exhaust the Postgres pool (max 8).', fix:'Partly mitigated now — /api/run caps concurrent projects at 6. Still to do: scope claim/reconcile by project, unique runnerId per loop, size the pool to the loop count.' },
+    { g:'defer', sev:'medium', t:'Scheduler pool exhaustion', v:'A global claim() + runLoop per project; runner split enables unique runnerId per worker (code-ready, opt-in, not yet flipped on prod); three concurrent projects can exhaust the Postgres pool (max 8).', fix:'Partly mitigated now — /api/run caps concurrent projects at 6. Still to do: scope claim/reconcile by project, unique runnerId per loop, size the pool to the loop count.' },
     { g:'defer', sev:'medium', t:'Lease / reclaim race', v:'The 240 s task lease can be shorter than a slow render + media download + LLM call, so a live task gets re-claimed → two writers hit the same artifact.', fix:'Make terminal writes conditional on claimed_by, heartbeat-extend the lease, only resurrect provably-dead owners.' },
     { g:'defer', sev:'medium', t:'No retry backoff', v:'Each task burns three full attempts with no backoff — a MiniMax 429 or outage gets hammered instead of paused.', fix:'Exponential backoff, fail-fast on identical repeated failures, a per-project circuit breaker.' },
-    { g:'defer', sev:'low', t:'Shipped sites are ephemeral', v:'sites/ is gitignored and QA can overwrite the preview thumbnail; output is lost on a host migration.', fix:'Persist final verified HTML in Postgres / object storage; write QA’s screenshot to a distinct path.' },
+    { g:'defer', sev:'low', t:'Shipped sites are ephemeral', v:'sites/ is gitignored (output lost on host migration). Board thumbnail now written off the hot path (non-gating); final HTML still ephemeral.', fix:'Persist final verified HTML in Postgres / object storage; write QA’s screenshot to a distinct path.' },
     { g:'defer', sev:'low', t:'Frontend polish', v:'Polling cadence, vis-network loaded from a CDN without SRI, missing API-down states, a few accessibility gaps.', fix:'UX hardening — real but not stack-survival; scheduled separately.' },
     { g:'defer', sev:'cross', t:'Dormant neighbour upstreams', v:'dash / gab44 / fleet* ride the same tunnel but their apps are down (502) and unsupervised — they belong to other projects on this box.', fix:'Each needs its own unit; coordinate with the owners before enabling.' },
   ];
@@ -528,7 +529,7 @@ function docsPage(){
     { n:'4', t:'Spec', d:'The build agent never writes HTML. It returns a small JSON spec: the brand (name, two colours, fonts) and an ordered list of sections with the real copy.' },
     { n:'5', t:'Render', d:'A deterministic renderer assembles the page from hand-built, vetted components. Navigation, spacing, fonts, the responsive menu and WCAG-safe colours are guaranteed by construction — the model cannot break them.' },
     { n:'6', t:'Media', d:'Real photography is pulled from Pexels, downloaded and served locally — no hotlinks, no grey placeholders.' },
-    { n:'7', t:'Verify', d:'A headless browser proves the page actually renders — non-blank, structural, no external or placeholder assets. Never the agent’s word; a failure retries with the reason.' },
+    { n:'7', t:'Verify', d:'A deterministic check proves the page is sound — valid structural HTML, no external or placeholder assets, no dead links, wired forms. No browser needed: the page is correct by construction. Never the agent’s word; a failure retries with the reason.' },
     { n:'8', t:'Ship', d:'A real, self-contained website at /sites/:id you can open, edit and share.' },
   ];
   // the vetted pieces the renderer composes from — the puzzle, not the magic
@@ -566,7 +567,7 @@ function docsPage(){
     { t:'Visual QA', d:'vision model · mobile + desktop', s:'ok' },
   ];
   const verify = [
-    ['site_renders','headless Chromium screenshot non-blank + structural, no external/placeholder assets, no dead buttons or unwired forms'],
+    ['site_renders','static: valid structural HTML, no external/placeholder assets, no dead CTA, wired forms — no browser (pages correct by construction)'],
     ['app_db','the app’s own isolated Postgres schema actually provisions and has its tables'],
     ['wcag','AA contrast on text vs background — derived by the renderer, so always binding'],
     ['json · json:keys','output must parse and carry the required keys'],
