@@ -60,7 +60,8 @@ const ROLE: Record<string, string> = {
                'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours.\n\n⚠️ FINAL CHECK before submitting: does your output contain any of \"<\", \">\", \"```\", or text before \"{\" or after \"}\"? If YES — REWRITE the entire response as pure JSON. JSON ONLY.',
   compose:     'You are the Composition department. You compose the ENTIRE multi-page website as ONE JSON object — the site\'s single source (its CMS). A deterministic renderer turns it into perfect, responsive, accessible pages and OWNS all visual design, the shared navigation, fonts, spacing, shape and the LOCKED brand palette. You only choose, for EACH page, its sections + real copy. Output ONLY JSON (no prose/markdown/fences):\n' +
                '{"pages":[{"slug":"index","title":"Home","sections":[ ...3-6 sections... ]},{"slug":"about","title":"About","sections":[...]}]}\n' +
-               'Compose EVERY page listed under "PAGES TO COMPOSE" using its EXACT slug + title; give each 3-6 sections; every page MUST open with a hero. Use the LOCKED brand name everywhere a name appears (hero/about/footer) — NEVER a different name or variation. Write real, specific copy for THIS brief (NEVER [placeholders] or lorem ipsum). image fields are 2-4 word stock-photo SEARCH TERMS (not URLs). A cta MAY set "link":"<page slug>".\n' +
+               'Compose EVERY page listed under "PAGES TO COMPOSE" using its EXACT slug + title; give each 3-6 sections; every page MUST open with a hero. Write real, specific copy for THIS brief (NEVER [placeholders] or lorem ipsum). image fields are 2-4 word stock-photo SEARCH TERMS (not URLs). A cta MAY set "link":"<page slug>".\n' +
+               'BUSINESS NAME — SYSTEM-OWNED, NOT YOUR CHOICE: wherever the business/brand name would appear in copy (headlines, about, footer, CTAs), write the LITERAL token {{brand}} — exactly those 9 characters. NEVER write an actual business name, variation, or made-up name anywhere. The system substitutes the ONE locked name. Example: "Welcome to {{brand}}" / "Why choose {{brand}}?" / "{{brand}} was founded in 2019". This guarantees one identity across every page.\n' +
                'Section types (mix what fits each page):\n' +
                '- {"type":"hero","image":"2-4 word photo","eyebrow":"kicker","headline":"...","lead":"1-2 sentence subhead","cta":"label"}\n' +
                '- {"type":"features","title":"...","intro":"one line","items":[{"title":"...","body":"..."}]}  (3-4)\n' +
@@ -98,7 +99,7 @@ function buildUser(ctx: Ctx, department?: string): string {
       s += ` Use EXACT table names so live data shows.\n`;
     }
     if (ctx.brand && ctx.brand.name) {
-      s += `\nBRAND NAME — LOCKED for the WHOLE site: "${ctx.brand.name}". Use EXACTLY this name everywhere a name appears (hero/about/footer) — NEVER a variation. (The renderer owns the palette + nav button; you only write copy + sections.)\n`;
+      s += `\nBUSINESS NAME — SYSTEM-OWNED: do NOT write the business name anywhere. Wherever the name would appear in copy, write the literal token {{brand}} — the system inserts the one locked name (the renderer also owns the logo, palette + nav button). You ONLY write copy + sections. Never invent or write a business name.\n`;
     }
     s += `\nEvery cta MAY set "link":"<page slug>". Valid slugs: ${(ctx.pages || []).map(p => p.slug).join(', ')}.\n`;
     return s;

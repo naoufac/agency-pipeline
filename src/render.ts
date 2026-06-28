@@ -53,7 +53,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   };
   const link = (raw: any, text: any) => resolveCta(raw, text);
   const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable })).join('\n');
-  return `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
+  const html = `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
@@ -73,4 +73,10 @@ Array.prototype.forEach.call(document.querySelectorAll('.feed[data-feed]'),funct
 Array.prototype.forEach.call(document.querySelectorAll('.collection[data-table]'),function(el){fetch('/api/site/'+encodeURIComponent(pid)+'/data/'+encodeURIComponent(el.getAttribute('data-table'))).then(function(r){return r.json()}).then(function(d){__rcards(el,(d&&d.rows)||[])}).catch(function(){})});};
 window.__relayLoad();</script>
 </body></html>`;
+  // FORCE the ONE business name: the model writes the literal token {{brand}} wherever the name appears in
+  // copy (it is never allowed to write a name); the system substitutes the single locked brand here. This is
+  // what makes the brand name in BODY COPY system-owned, not an LLM choice — identical on every page.
+  return html
+    .replace(/\{\{\s*brand\s*\}\}/gi, esc(brand))   // the ONE name, filled deterministically
+    .replace(/\{\{[^}]*\}\}/g, esc(brand));          // defensive: any stray token also becomes the brand (never ship a raw token)
 }
