@@ -3,6 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop } from './verify.ts';
+import { scorePage } from './eval.ts';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => { if (cond) { pass++; } else { fail++; console.error(`  ✗ ${name} ${extra}`); } };
@@ -100,6 +101,20 @@ ok('slop ignores CSS/JS', copySlop('<style>.x{content:"lorem ipsum"}</style><scr
 ok('real copy passes #1', copySlop('<h1>Lisboa Roasters — single-origin coffee roasted in Alfama</h1><p>Order online, pick up in store.</p>') === null);
 ok('real copy passes #2', copySlop('<h2>Book a table</h2><p>Open Tue–Sun, 6pm till late. For example, our tasting menu changes weekly.</p>') === null);
 ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing here yet — be the first to add one.</p>') === null);
+
+// ---- R2 eval scorer: objective signals, no model opinion ----
+{
+  const goodHtml = '<h1>Lisboa Roasters</h1><section>12 single-origin beans from €9, roasted in Alfama. Open Tue–Sun, 8am.</section><section>Pickup or delivery.</section>';
+  const gs = scorePage(goodHtml, { sections: [{ type: 'hero' }, { type: 'features' }, { type: 'split' }] });
+  ok('scorer: specific page passes gate', gs.gatePass === true);
+  ok('scorer: counts section variety', gs.distinctTypes === 3);
+  ok('scorer: counts concrete signals', gs.specific >= 2);
+  ok('scorer: no generic filler', gs.genericHits === 0);
+  const genHtml = '<h1>Solutions</h1><section>We deliver world-class, cutting-edge solutions to empower your business and elevate your brand.</section><section>x</section>';
+  const gen = scorePage(genHtml, { sections: [{ type: 'hero' }, { type: 'features' }] });
+  ok('scorer: flags generic filler', gen.genericHits >= 3);
+  ok('scorer: filler scores below specific', gen.specificity < gs.specificity);
+}
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -109,11 +109,16 @@ async function llmPlan(brief: string): Promise<Plan | null> {
   try { return validate(parsed, brief); } catch { return null; }
 }
 
+// pure plan (NO database) — the LLM planner with the template fallback, both through validate(). Reused by
+// plan() and by the eval harness (src/eval.ts) so the harness measures the REAL planning path DB-free.
+export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: boolean }> {
+  const llmResult = await llmPlan(brief);
+  return { plan: llmResult || validate({ tasks: FB_THINKING, pages: FB_PAGES }, brief)!, usedLLM: !!llmResult };
+}
+
 export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   // Both paths flow through validate(), so the fallback gets the same archetype/database/verify wiring.
-  const llmResult = await llmPlan(brief);
-  const result = llmResult || validate({ tasks: FB_THINKING, pages: FB_PAGES }, brief)!;
-  const usedLLM = !!llmResult;
+  const { plan: result, usedLLM } = await buildPlan(brief);
   const { tasks, pages, theme, archetype } = result;
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype };
 
