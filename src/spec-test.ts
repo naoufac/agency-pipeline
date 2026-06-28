@@ -3,7 +3,8 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson } from './spec.ts';
+import { extractFirstJson, applyBrand } from './spec.ts';
+import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
 let pass = 0, fail = 0;
@@ -128,6 +129,26 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   const gen = scorePage(genHtml, { sections: [{ type: 'hero' }, { type: 'features' }] });
   ok('scorer: flags generic filler', gen.genericHits >= 3);
   ok('scorer: filler scores below specific', gen.specificity < gs.specificity);
+}
+
+// ---- BRAND LOCK: every page of a project must render the SAME logo, palette + nav (the recurring bug) ----
+{
+  const canon = { name: 'Lisboa Roasters', cta: 'Order online', tokens: { bg: '#0b0e14', primary: '#e0a96d' } };
+  const pages = [{ slug: 'index', title: 'Home' }, { slug: 'about', title: 'Our story' }, { slug: 'contact', title: 'Contact' }];
+  // two DIFFERENT page specs that each invented their OWN (wrong) brand + colours:
+  const sA: any = { brand: { name: 'WRONG ALPHA', tokens: { bg: '#ffffff', primary: '#ff0000' } }, sections: [{ type: 'hero', headline: 'A' }, { type: 'features', items: [{ title: 't', body: 'b' }] }] };
+  const sB: any = { brand: { name: 'WRONG BETA', tokens: { bg: '#123456', primary: '#00ff00' } }, sections: [{ type: 'hero', headline: 'B' }, { type: 'cta', headline: 'c' }] };
+  applyBrand(sA, canon); applyBrand(sB, canon);
+  const hA = renderPage(sA, { pages, slug: 'index', title: 'Home' });
+  const hB = renderPage(sB, { pages, slug: 'about', title: 'Our story' });
+  const logo = (h: string) => (h.match(/<a class="nav-brand"[^>]*>([^<]*)<\/a>/) || [])[1];
+  const palette = (h: string) => `${(h.match(/--bg:(#[0-9a-fA-F]+)/) || [])[1]}|${(h.match(/--primary:(#[0-9a-fA-F]+)/) || [])[1]}`;
+  const navTargets = (h: string) => (h.match(/href="(?:index|about|contact)\.html"/g) || []).sort().join(',');
+  ok('brand lock: logo identical on every page', logo(hA) === logo(hB) && logo(hA) === 'Lisboa Roasters');
+  ok('brand lock: per-page invented brand discarded', logo(hA) !== 'WRONG ALPHA' && logo(hB) !== 'WRONG BETA');
+  ok('brand lock: palette identical on every page', palette(hA) === palette(hB) && /#0b0e14/i.test(palette(hA)));
+  ok('brand lock: nav links identical on every page', navTargets(hA) === navTargets(hB) && navTargets(hA).length > 0);
+  ok('brand lock: footer brand identical', (hA.match(/©\s*([^<]*)</) || [])[1] === (hB.match(/©\s*([^<]*)</) || [])[1]);
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

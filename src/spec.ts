@@ -128,6 +128,26 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
   return s;
 }
 
+// ---- project-wide BRAND LOCK ----
+// Every page is built by a separate agent call, so each invents its own brand name + colours -> the
+// logo and palette drift page to page. Fix: the FIRST page locks a canonical brand; every page renders
+// with it. brandIdentity() extracts it from a spec; applyBrand() forces a spec to use the canonical one.
+export type Brand = { name: string; cta: string | null; tokens: any };
+export function brandIdentity(spec: any): Brand {
+  const b = (spec && spec.brand && typeof spec.brand === 'object') ? spec.brand : {};
+  return {
+    name: (typeof b.name === 'string' && b.name.trim()) ? b.name.trim() : 'Studio',
+    cta: (typeof b.cta === 'string' && b.cta.trim()) ? b.cta.trim() : null,
+    tokens: (b.tokens && typeof b.tokens === 'object' && !Array.isArray(b.tokens)) ? b.tokens : {},
+  };
+}
+export function applyBrand(spec: any, canon: Brand): void {
+  if (!spec.brand || typeof spec.brand !== 'object') spec.brand = {};
+  spec.brand.name = canon.name;                                            // identical logo on every page
+  if (canon.cta) spec.brand.cta = canon.cta;                               // identical nav button
+  if (canon.tokens && Object.keys(canon.tokens).length) spec.brand.tokens = canon.tokens;  // identical palette
+}
+
 // THE CONTRACT. Always returns a result; `errors.length > 0` means REJECT (caller throws -> retry-with-feedback).
 export function normalizeSpec(raw: any, ctx: SpecCtx = {}): SpecResult {
   const repairs: string[] = []; const errors: string[] = [];

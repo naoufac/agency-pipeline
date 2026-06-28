@@ -25,7 +25,7 @@ const WEB_DEPTS = new Set(['research', 'strategy']);
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any } };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {

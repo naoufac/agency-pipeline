@@ -8,7 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec, extractFirstJson } from './spec.ts';
+import { normalizeSpec, extractFirstJson, brandIdentity, applyBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -57,6 +57,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const params = proj.rows[0].params || {};
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
+  const brand = params.brand;   // canonical project brand (logo + nav button + palette), shared by every page
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
   // (the main public list — products/listings/menu — so a collection reliably shows real data)
@@ -72,7 +73,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
     } catch {}
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable, brand };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -96,6 +97,17 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
+        // BRAND LOCK: every page of a project shares ONE logo, nav button + palette. The first page to
+        // build sets the canonical brand (atomic, race-safe across parallel builds); every page renders
+        // with it — never its own invented brand. This is what keeps the header/logo CONSTANT site-wide.
+        let canon = (ctx as any).brand;
+        if (!canon) {
+          const bi = brandIdentity(spec);
+          await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(bi)]);
+          const rr = await pool.query("select params->'brand' as brand from projects where id=$1", [task.project_id]);
+          canon = (rr.rows[0] && rr.rows[0].brand) || bi;
+        }
+        applyBrand(spec, canon);
         const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
