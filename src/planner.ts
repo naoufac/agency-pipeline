@@ -100,9 +100,21 @@ function validate(plan: any, brief: string): Plan | null {
   return { tasks: [...tasks, ...pageBuilds, qa], pages, theme, archetype };
 }
 
+// Hard wall-clock cap on the planner's LLM call. It flows through the shared llm()/callLLM, which already
+// honors a 90s fetch-abort — but a stalled web-search completion (or an abort that fails to propagate) can
+// still blow the planner step past that, which is what drove p95 to ~3.6h. This Promise.race guarantees the
+// step can never exceed PLAN_TIMEOUT_MS, independent of the underlying fetch timeout.
+const PLAN_TIMEOUT_MS = Number(process.env.PLAN_TIMEOUT_MS || 60000);
+
 async function llmPlan(brief: string): Promise<Plan | null> {
   // web:true — ground the plan in the REAL domain (live competitors/positioning/conventions), not just training data.
-  let raw = ''; try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 4000, { web: true }); } catch { return null; }
+  let raw = '';
+  try {
+    raw = await Promise.race([
+      llm(PLANNER_SYS, 'BRIEF: ' + brief, 4000, { web: true }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`planner timeout after ${PLAN_TIMEOUT_MS}ms`)), PLAN_TIMEOUT_MS)),
+    ]);
+  } catch { return null; }
   if (!raw.trim()) return null;
   const txt = raw.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
   const s = txt.indexOf('{'), e = txt.lastIndexOf('}'); if (s < 0 || e <= s) return null;
