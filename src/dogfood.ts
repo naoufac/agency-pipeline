@@ -16,6 +16,22 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export type Issue = { page: string; viewport: string; kind: string; detail: string; severity: 'high' | 'medium' | 'low' };
 
+// Self-correction: which review findings a REBUILD-with-feedback can plausibly fix (content the LLM
+// controls) vs. system/CSS issues a rebuild can't (header/overflow → surfaced to a developer instead).
+const CONTENT_FIXABLE = new Set(['dead-button', 'garbage-button', 'broken-link', 'empty-collection', 'collection-not-rendering', 'form-not-persisted']);
+// Pure + deterministic: high, content-fixable issues grouped by the REAL page they're on → re-build targets.
+export function repairPlan(issues: Issue[], pageSlugs: string[]): { slug: string; notes: string[] }[] {
+  const byPage = new Map<string, string[]>();
+  for (const i of issues) {
+    if (i.severity !== 'high' || !CONTENT_FIXABLE.has(i.kind)) continue;
+    const slug = String(i.page || '').replace(/\.html$/, '');
+    if (!pageSlugs.includes(slug)) continue;
+    if (!byPage.has(slug)) byPage.set(slug, []);
+    byPage.get(slug)!.push(`${i.kind}: ${i.detail}`);
+  }
+  return [...byPage].map(([slug, notes]) => ({ slug, notes }));
+}
+
 // ---- minimal CDP client (no puppeteer; drives the system chromium directly) ----
 class CDP {
   private ws!: WebSocket; private id = 0; private pending = new Map<number, { res: (v: any) => void; rej: (e: any) => void }>();
@@ -151,5 +167,32 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl = 'h
     await pool.query('insert into dogfood_reviews(project_id, passed, summary, issues, checked) values ($1,$2,$3,$4,$5)',
       [projectId, high === 0, summary, JSON.stringify(issues), JSON.stringify(checked)]);
     await ev(pool, projectId, null, 'dogfood', summary);
+
+    // SELF-CORRECTING LOOP: the verdict is load-bearing. On content-level high findings, re-open the
+    // affected page build(s) with the findings as feedback (reuse retry-with-feedback), rebuild, and the
+    // runner re-reviews on completion. Capped to one round — after that the verdict stands (board flags
+    // it), so a persistent failure surfaces a SYSTEM bug to a developer instead of looping forever.
+    if (high) {
+      const REPAIR_CAP = 1;
+      const repairs = Number((await pool.query("select count(*)::int n from run_events where project_id=$1 and type='dogfood_repair'", [projectId])).rows[0].n);
+      const pageSlugs = ((await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params?.pages || []).map((p: any) => p.slug);
+      const plan = repairPlan(issues, pageSlugs);
+      if (plan.length && repairs < REPAIR_CAP) {
+        let reopened = 0;
+        for (const { slug, notes } of plan) {
+          const t = (await pool.query("select id from tasks where project_id=$1 and department='build' and artifact=$2", [projectId, slug + '.html'])).rows[0];
+          if (!t) continue;
+          await ev(pool, projectId, t.id, 'verify_failed', `interaction review found problems on this page — FIX them: ${notes.slice(0, 4).join(' · ')}`);
+          await pool.query("update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [t.id]);
+          reopened++;
+        }
+        if (reopened) {
+          await ev(pool, projectId, null, 'dogfood_repair', `re-building ${reopened} page(s) from the interaction review (round ${repairs + 1})`);
+          await pool.query("update projects set status='running' where id=$1", [projectId]);
+          const { runLoop } = await import('./runner.ts');   // dynamic: avoid a static import cycle (runner -> dogfood)
+          runLoop(pool, projectId, { cap: 4 }).catch(() => {});
+        }
+      }
+    }
   } catch (e: any) { await ev(pool, projectId, null, 'dogfood', 'reviewer error: ' + (e?.message ?? e)).catch(() => {}); }
 }
