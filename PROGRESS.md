@@ -154,3 +154,25 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 - A/B test infrastructure: instrument per-call provider + latency so we can measure openrouter vs direct on real data
 - a94d539a autopsy — the failed project. what specifically broke?
 - dogfood self-correct live test — need a content-level failure to exercise the new spec_findings capture path
+
+## 2026-06-28 — Day 1 update (15:37 UTC)
+
+### R5 shipped (autonomous)
+- commit `df9ebd7 R5: openrouter scope — planner web:false (kills 3.6h planner hang at the source)`
+- src/planner.ts: 1 line change (web:true → web:false) + comment
+- 4 lines diff total
+
+### CRON FIX (the gap Nao flagged)
+- previous cron: passive state logger + flag file. nothing woke zoro.
+- new cron: ACTIVE Telegram alert on material events
+  - reads /opt/nao-claude-tg/.env (TG_TOKEN + OWNER_ID)
+  - on material state → POST to api.telegram.org/bot{TOKEN}/sendMessage
+  - alert content: timestamp + reasons + last commit + state snapshot
+- now "didn't work" can't happen — Nao gets a Telegram message the moment something material happens
+- ALSO: detects NEW COMMITS since last tick (the missed-it case from earlier)
+- ALSO: state file /tmp/zoro-relay-state.json tracks last-commit hash so the new-commit detection is deterministic
+
+### next queue
+- R6: A/B instrumentation (per-call provider + latency into run_events)
+- a94d539a autopsy (failed project, what specifically broke pre-R3)
+- dogfood self-correct live test (need a real content defect)
