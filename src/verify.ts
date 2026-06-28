@@ -68,6 +68,13 @@ export function pageLogo(html: string): string { return ((html.match(/class="nav
 export function pagePalette(html: string): string {
   return `${(html.match(/--primary:\s*(#[0-9a-fA-F]{3,8})/) || [])[1] || '?'}/${(html.match(/--bg:\s*(#[0-9a-fA-F]{3,8})/) || [])[1] || '?'}`;
 }
+// The ordered nav entries (page links + the CTA button label). The whole navigation — not just the logo —
+// must be identical on every page; this catches a per-page CTA button label drifting (the renderer's nav
+// links come from the shared page list, but the button label is brand.cta, which must be locked too).
+export function pageNav(html: string): string {
+  const ul = (html.match(/class="nav-links">([\s\S]*?)<\/ul>/) || [])[1] || '';
+  return (ul.match(/>([^<]+)<\/a>/g) || []).map(s => s.replace(/^>|<\/a>$/g, '').trim()).join(' | ');
+}
 
 export async function verify(pool: pg.Pool, task: any, content: string): Promise<{ ok: boolean; log: string }> {
   const rule: string = task.verify;
@@ -161,16 +168,17 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     let files: string[] = [];
     try { files = readdirSync(fileURLToPath(dir)).filter(f => f.endsWith('.html')).sort(); } catch {}
     if (!files.length) return { ok: false, log: 'no pages produced' };
-    const logos = new Set<string>(); const palettes = new Set<string>();
+    const logos = new Set<string>(); const palettes = new Set<string>(); const navs = new Set<string>();
     for (const f of files) {
       const html = readFileSync(fileURLToPath(new URL(f, dir)), 'utf8');
       const nd = navDefect(html);
       if (nd) return { ok: false, log: `${f}: ${nd}` };
-      logos.add(pageLogo(html)); palettes.add(pagePalette(html));
+      logos.add(pageLogo(html)); palettes.add(pagePalette(html)); navs.add(pageNav(html));
     }
     if (logos.size !== 1) return { ok: false, log: `logo drifts across pages — ${[...logos].map(l => JSON.stringify(l)).join(' · ')}. Every page must show ONE logo.` };
     if (palettes.size !== 1) return { ok: false, log: `palette drifts across pages — ${[...palettes].join(' · ')}. Every page must share ONE palette.` };
-    return { ok: true, log: `${files.length} pages consistent — 1 nav/1 logo each · logo ${JSON.stringify([...logos][0])} · palette ${[...palettes][0]}` };
+    if (navs.size !== 1) return { ok: false, log: `navigation drifts across pages — ${[...navs].map(n => JSON.stringify(n)).join(' · ')}. Every page must show the SAME nav (links + button).` };
+    return { ok: true, log: `${files.length} pages consistent — 1 nav/1 logo each · logo ${JSON.stringify([...logos][0])} · palette ${[...palettes][0]} · nav [${[...navs][0]}]` };
   }
 
   return { ok: false, log: 'unknown verify rule: ' + rule };

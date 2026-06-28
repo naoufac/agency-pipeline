@@ -3,7 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson, applyBrand } from './spec.ts';
+import { extractFirstJson, applyBrand, resolveBrand, navCtaFor } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
@@ -149,6 +149,38 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('brand lock: palette identical on every page', palette(hA) === palette(hB) && /#0b0e14/i.test(palette(hA)));
   ok('brand lock: nav links identical on every page', navTargets(hA) === navTargets(hB) && navTargets(hA).length > 0);
   ok('brand lock: footer brand identical', (hA.match(/©\s*([^<]*)</) || [])[1] === (hB.match(/©\s*([^<]*)</) || [])[1]);
+}
+
+// ---- FORCED identity: a page can NEVER keep its own colours, and the canon is ALWAYS complete ----
+{
+  // resolveBrand always yields a COMPLETE palette (bg + primary), whatever the branding output looks like:
+  const full = resolveBrand('{"name":"Rille","palette":{"primary":"#1c1917","accent":"#caa15a","bg":"#f7f5f2","text":"#111"}}');
+  ok('resolveBrand: name parsed', full.name === 'Rille');
+  ok('resolveBrand: bg+primary parsed', full.tokens.bg === '#f7f5f2' && full.tokens.primary === '#1c1917');
+  // branding gives bg+text+accent but NO primary (the realistic drift hole) → primary still filled deterministically:
+  const noPrim = resolveBrand('{"name":"Brief","palette":{"bg":"#0f1419","accent":"#3b82f6","text":"#e6edf3"}}');
+  ok('resolveBrand: missing primary → filled (never empty)', /^#[0-9a-f]{3,8}$/i.test(noPrim.tokens.primary) && noPrim.tokens.bg === '#0f1419');
+  // total garbage / no JSON → still a complete, usable palette + default name (never throws, never empty):
+  const garbage = resolveBrand('the branding agent wrote prose, no json at all');
+  ok('resolveBrand: garbage → complete default palette', !!garbage.tokens.bg && !!garbage.tokens.primary && garbage.name === 'Studio');
+
+  // applyBrand FORCES the palette even when the page invented its own non-empty tokens:
+  const pageWithOwnColours: any = { brand: { name: 'WRONG', tokens: { bg: '#000000', primary: '#ff0000' } }, sections: [hero()] };
+  applyBrand(pageWithOwnColours, full);
+  ok('applyBrand: page tokens overwritten by canon', pageWithOwnColours.brand.tokens.bg === '#f7f5f2' && pageWithOwnColours.brand.tokens.primary === '#1c1917');
+  ok('applyBrand: page name overwritten by canon', pageWithOwnColours.brand.name === 'Rille');
+  // even if a canon somehow had EMPTY tokens, the page's own colours must NOT survive (falls back to default):
+  const pageEmptyCanon: any = { brand: { name: 'X', tokens: { bg: '#abcdef', primary: '#fedcba' } }, sections: [hero()] };
+  applyBrand(pageEmptyCanon, { name: 'Y', cta: null, tokens: {} as any });
+  ok('applyBrand: empty canon never leaks page tokens', pageEmptyCanon.brand.tokens.bg !== '#abcdef' && pageEmptyCanon.brand.tokens.primary !== '#fedcba');
+
+  // NAV BUTTON is one per site too: deterministic by archetype, and applyBrand forces it (no per-page label)
+  ok('navCtaFor: store/app/site deterministic', navCtaFor('store') === 'Shop now' && navCtaFor('app') === 'Get started' && navCtaFor('site') === 'Get in touch' && navCtaFor(undefined) === 'Get in touch');
+  ok('resolveBrand: nav cta from archetype', resolveBrand('{"name":"N","palette":{"bg":"#fff","primary":"#111"}}', undefined, 'store').cta === 'Shop now');
+  const pageOwnCta: any = { brand: { name: 'Z', cta: 'Enter the World', ctaLink: 'gallery', tokens: { bg: '#fff', primary: '#111' } }, sections: [hero()] };
+  applyBrand(pageOwnCta, { name: 'Z', cta: 'Get in touch', tokens: { bg: '#fff', primary: '#111' } });
+  ok('applyBrand: per-page nav button label overwritten', pageOwnCta.brand.cta === 'Get in touch');
+  ok('applyBrand: per-page ctaLink stripped (target resolved deterministically)', pageOwnCta.brand.ctaLink === undefined);
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

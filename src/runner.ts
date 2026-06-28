@@ -8,7 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec, extractFirstJson, brandIdentity, applyBrand } from './spec.ts';
+import { normalizeSpec, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -57,20 +57,13 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const params = proj.rows[0].params || {};
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
-  let brand = params.brand;   // canonical project brand (logo + nav button + palette), shared by every page
-  // SINGLE SOURCE: derive the one brand identity from the branding department so every page's COPY and
-  // logo use the SAME name + colours (branding runs upstream of all page builds, so it's the same for all).
-  if (task.department === 'build') {
+  // SINGLE SOURCE OF TRUTH: the canonical site identity is locked into params.brand the moment Branding
+  // passes (see processTask). For a build, read it. If it's somehow not set yet, derive it DETERMINISTICALLY
+  // from the upstream branding output — resolveBrand() always returns a complete palette. NEVER the page spec.
+  let brand = params.brand;
+  if (!brand && task.department === 'build') {
     const bj = ups.rows.find((u: any) => u.department === 'branding');
-    if (bj) {
-      try {
-        const o = extractFirstJson(bj.content); const p = (o && o.palette) || {};
-        const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
-        const name = (o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (brand && brand.name);
-        const tokens = (isHex(p.bg) && isHex(p.primary)) ? { bg: p.bg.trim(), primary: p.primary.trim(), ...(isHex(p.accent) ? { accent: p.accent.trim() } : {}) } : (brand && brand.tokens);
-        if (name || tokens) brand = { name, cta: (brand && brand.cta) || null, tokens: tokens || {} };
-      } catch {}
-    }
+    if (bj) brand = resolveBrand(bj.content, undefined, params.archetype);
   }
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
@@ -111,19 +104,12 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
-        // BRAND LOCK: every page shares ONE logo, nav button + palette. Name comes from branding (same for
-        // all pages); colours from branding or this page. The FIRST build atomically writes the record;
-        // every page then reads the SAME one and renders with it — never its own invented brand.
-        const bi = brandIdentity(spec);
-        const cb = (ctx as any).brand || {};
-        const locked = {
-          name: (cb.name && String(cb.name).trim()) || bi.name,
-          cta: cb.cta || bi.cta,
-          tokens: (cb.tokens && Object.keys(cb.tokens).length) ? cb.tokens : bi.tokens,
-        };
-        await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(locked)]);
-        const rr = await pool.query("select params->'brand' as brand from projects where id=$1", [task.project_id]);
-        const canon = (rr.rows[0] && rr.rows[0].brand) || locked;
+        // BRAND LOCK (deterministic, not a request to the model): the ONE site identity is already locked
+        // into params.brand at branding-completion (and re-derived in buildContext as a backstop). FORCE it
+        // onto this page — name, nav button AND palette — so the renderer can NEVER use the model's per-page
+        // brand or colours. brandIdentity(spec) is only an absolute last resort if no canonical brand exists.
+        const canon = (ctx as any).brand || brandIdentity(spec);
+        await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
         applyBrand(spec, canon);
         // clean page <title>: the page's nav title (e.g. "Our Story"), NOT the internal task name ("Build the … page")
         const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
@@ -142,6 +128,16 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
     const { ok, log } = await verify(pool, task, content);   // deterministic check — not the agent's word
     if (ok) {
+      // LOCK the ONE site identity the moment Branding passes — deterministically, BEFORE any page build can
+      // be claimed (every build depends on branding). resolveBrand() always yields a complete palette, so the
+      // build path can FORCE it onto every page. This is the single source of truth; no page can ever drift.
+      if (task.department === 'branding') {
+        try {
+          const ar = await pool.query("select params->>'archetype' as a from projects where id=$1", [task.project_id]);
+          const b = resolveBrand(content, (ctx as any)?.brand?.name, ar.rows[0]?.a);
+          await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(b)]);
+        } catch (e: any) { console.error('brand lock', e?.message ?? e); }
+      }
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
       await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
       // freeze the editable snapshot + blocks for the CMS (normal builds only, never a republish)

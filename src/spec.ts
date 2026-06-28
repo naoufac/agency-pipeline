@@ -141,11 +141,42 @@ export function brandIdentity(spec: any): Brand {
     tokens: (b.tokens && typeof b.tokens === 'object' && !Array.isArray(b.tokens)) ? b.tokens : {},
   };
 }
+// Last-resort palette — only used if a canonical brand somehow carries no tokens. Never the page's own.
+const DEFAULT_TOKENS = { bg: '#ffffff', primary: '#4f46e5' };
 export function applyBrand(spec: any, canon: Brand): void {
   if (!spec.brand || typeof spec.brand !== 'object') spec.brand = {};
   spec.brand.name = canon.name;                                            // identical logo on every page
-  if (canon.cta) spec.brand.cta = canon.cta;                               // identical nav button
-  if (canon.tokens && Object.keys(canon.tokens).length) spec.brand.tokens = canon.tokens;  // identical palette
+  // FORCE the nav button label + DROP any per-page ctaLink so its target is resolved deterministically from
+  // the (now identical) label + shared page list — the whole nav is the same on every page, not just the logo.
+  if (canon.cta) { spec.brand.cta = canon.cta; delete spec.brand.ctaLink; }
+  // FORCE the palette unconditionally — the renderer reads spec.brand.tokens, so a page must NEVER keep its
+  // own invented colours. canon.tokens is guaranteed complete by resolveBrand(); DEFAULT_TOKENS is a floor so
+  // an empty canon can't open a leak. This is what makes "one palette per site" a guarantee, not a request.
+  spec.brand.tokens = (canon.tokens && Object.keys(canon.tokens).length) ? canon.tokens : { ...DEFAULT_TOKENS };
+}
+
+// The ONE nav button for the whole site, chosen deterministically from the archetype (no per-page LLM label).
+export function navCtaFor(archetype?: string): string {
+  const a = String(archetype || 'site').toLowerCase();
+  return a === 'store' ? 'Shop now' : a === 'app' ? 'Get started' : 'Get in touch';
+}
+
+// THE single deterministic site identity, derived ONLY from the Branding department's output (the one
+// upstream source every page build shares). ALWAYS returns a COMPLETE palette (bg + primary at minimum) so
+// applyBrand() can force it onto every page. No LLM trust, no per-page fallback. Pure + unit-tested.
+export function resolveBrand(brandingContent: string, fallbackName = 'Studio', archetype?: string): Brand {
+  let o: any = null;
+  try { o = extractFirstJson(brandingContent); } catch {}
+  const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
+  const p = (o && (o.palette || o)) || {};
+  const name = (o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (fallbackName || 'Studio');
+  const bg = isHex(p.bg) ? p.bg.trim() : DEFAULT_TOKENS.bg;
+  const primary = isHex(p.primary) ? p.primary.trim()
+    : isHex(p.accent) ? p.accent.trim()
+    : isHex(p.text) ? p.text.trim() : DEFAULT_TOKENS.primary;
+  const tokens: any = { bg, primary };
+  if (isHex(p.accent)) tokens.accent = p.accent.trim();
+  return { name, cta: navCtaFor(archetype), tokens };
 }
 
 // THE CONTRACT. Always returns a result; `errors.length > 0` means REJECT (caller throws -> retry-with-feedback).
