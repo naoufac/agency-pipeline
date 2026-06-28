@@ -176,3 +176,27 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 - R6: A/B instrumentation (per-call provider + latency into run_events)
 - a94d539a autopsy (failed project, what specifically broke pre-R3)
 - dogfood self-correct live test (need a real content defect)
+
+## 2026-06-28 — Day 1 update (16:24 UTC)
+
+### R6 shipped (autonomous)
+- commit `f82b2c3 R6: A/B instrumentation — per-call provider + latency into run_events`
+- src/agents.ts: callLLM returns `{text, meta}` (provider/model/latencyMs/web/ok/error) + new llmTracked() wrapper
+- src/runner.ts: writes run_events.type='llm_call' after each LLM call
+- src/kpi.ts: 2 new KPIs — provider split (7d, %) + avg LLM latency per provider
+- **no new projects yet since deploy — waiting for next brief to populate metrics**
+
+### cron working as designed
+- 16:00 fire detected new commit (R6) via state-file diff
+- Telegram alert triggered
+- state file `/tmp/zoro-relay-state.json` tracks last commit hash deterministically
+- proves the gap is closed
+
+### a94d539a autopsy findings (16:00 UTC)
+- 11-task DAG: research, branding, strategy done; contentia + database failed → 5 builds + qa blocked forever
+- root cause #1: contentia JSON parse failure (R3 FIXED this)
+- root cause #2: database "no tables in the data model" + "integer out of range" → NEXT HOTSPOT
+- R7 = normalizeDataModel() — same pattern as R3, applied to database dept
+
+### next
+- spawn v7 = data model normalize (the autopsy's clear next move)
