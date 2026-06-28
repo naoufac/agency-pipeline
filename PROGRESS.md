@@ -84,3 +84,42 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 3. spawn claude v2 for verify.ts tightening (task 4) — strict scope, --bare, --allowedTools "Bash(npm run*) Edit"
 4. spawn claude v3 for dogfood capture (task 5)
 5. update PROGRESS.md with each commit
+
+## 2026-06-28 — Day 1 update (10:25 UTC)
+
+### R1 + brand-lock shipped
+- commit `d202be5` pushed to github (master now at 7103061..d202be5)
+- spec:check 68/0, tsc clean
+- src/spec.ts (+35), src/spec-test.ts (+34), src/runner.ts (refactored), src/verify.ts (+14 new site_consistent gate)
+- architectural brand-lock: nav button + palette + logo identical across pages, structurally impossible to drift
+- supersedes soft-instruction attempts 5612ae6 + 417b8f2 (the "questionable pushes")
+
+### github auth fixed
+- `gh auth` was already authenticated as `naoufac` with `repo` scope
+- the deploy key (id_ed25519_github, comment `nao-vps-deploy`) was SSH read-only — wrong path
+- switched remote to HTTPS, gh token used the existing credential
+- one push succeeded; `naoufac/agency-pipeline` warns "moved" to `agency-pipeline-Relay` — kept old for now, ask Nao if to switch
+
+### OpenRouter doubt confirmed by data
+- real error in run_events: `#13: OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)`
+- current OpenRouter code (agents.ts:102): `body.reasoning = { effort: 'low' }` ONLY in else-branch (non-web calls)
+- so when web:true (research/strategy), reasoning has NO cap → eats token budget → output truncated
+- fix in task 6 below
+
+### claude v2 spawned (task 5+6 bundled)
+- session 1097bf31-0a8c-4b1c-831b-f70fc660d062
+- model: claude-opus-4-8[1m]
+- bypassPermissions (works via `IS_SANDBOX=1` env, which bridge.py uses)
+- scope: 4 files (`db/schema.sql`, `src/dogfood.ts`, `src/evolver.ts` NEW, `src/agents.ts`)
+- task 5: dogfood capture → spec_findings table + evolver stub (level-3 foundation)
+- task 6: max_tokens cap unconditional, floor bumped to 16000 (fixes the truncation)
+- `--allowedTools` restricted to Bash(npm run* tsc* npx tsx* git add* git commit* git status* git diff* git log*) + Edit Read Glob Grep — no push, no refactor
+- output goes to /tmp/claude-v2.log
+- cron (zoro-relay-mgmt) will pick up state changes; manual review before push
+
+### TODO (after claude v2)
+1. review claude's diff + test output
+2. commit + push to github
+3. update PROGRESS.md with v2 results
+4. decision: A/B test openrouter vs direct MiniMax (Nao asked)
+5. decision: switch remote to agency-pipeline-Relay (Nao's call)
