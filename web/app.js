@@ -541,6 +541,10 @@ function docsPage(){
     ['form','A real form whose submissions are stored in the database.'],
     ['feed','A live list of the site’s own public submissions — a directory, wall or reviews.'],
     ['collection','A live list rendered from the project’s real database table — products, menu, listings.'],
+    ['pricing','Two-to-three plans, one featurable, with check-marked feature lists.'],
+    ['testimonials','Quote cards — social proof in the brand’s voice.'],
+    ['faq','A clean question/answer accordion (no JS).'],
+    ['stats','A band of big-number proof points.'],
   ];
   // one engine, many layers — the brief decides which apply. No discrimination.
   const layers = [

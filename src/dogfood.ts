@@ -1,9 +1,10 @@
 // dogfood.ts — the reviewer that mimics a human. It drives a REAL Chromium over CDP and actually USES a
 // produced site: visits every page at desktop + mobile, measures layout (header alignment, horizontal
-// overflow), checks every CTA actually goes somewhere, TYPES into and SUBMITS the form (asserting the
-// on-page confirmation AND that the row reached Postgres), and confirms collections render live DB rows.
-// This is verification by interaction, not by screenshot — it catches dead buttons / misaligned headers /
-// broken forms that a vision pass or static check can miss.
+// overflow), audits EVERY anchor (label sanity + dead href) and LOAD-TESTS every internal link target,
+// TYPES into and SUBMITS the form (asserting the confirmation AND that the row landed — in the real table
+// or the submissions bucket), and confirms collections render live DB rows. Resilient to mid-check
+// navigation; POLLS for async content (no timing false-positives). Verification by interaction, not a
+// screenshot. Auto-runs on completion -> dogfood_reviews -> shown on each project card. KNOWN: see docs/RETRO.md.
 import { spawn, type ChildProcess } from 'node:child_process';
 import WebSocket from 'ws';
 import pg from 'pg';

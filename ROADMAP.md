@@ -37,8 +37,11 @@ Each operator signs in and owns their own projects + produced sites. The system 
 ### Deeper database (the technical-perfection track)
 The schema compiler is live; next: **typed forms generated from the model** (a form that writes a real row, fields + validation derived from the entity), relation-aware collections (show a product's category name via its FK), an **auth** department (accounts on the project's own schema), and safe **migrations** when a rebuild changes the model (today a populated schema is preserved, not altered).
 
-### Wider component library
-More section types (pricing, testimonials, FAQ, team, menu, stats) and per-section variants, so more briefs map cleanly onto vetted parts — the puzzle grows, the renderer stays deterministic.
+### Wider component library (in progress)
+Shipped: **pricing · testimonials · FAQ · stats** (+ hero/features/split/gallery/cta/form/feed/collection). Next: team, menu, logos, and per-section variants — so more briefs map cleanly onto vetted parts; the puzzle grows, the renderer stays deterministic.
+
+### Trustworthy review (in progress)
+The interaction reviewer (`dogfood`) now drives a real browser over CDP: every link load-tested, every CTA labelled + targeted, the form typed + submitted + verified, layout measured — auto-run on completion, verdict shown on each project card. Open item (see `docs/RETRO.md`): an accuracy pass on the reviewer's own headless fetches.
 
 ### Stack router (when it earns its keep)
 The archetype classifier is the first cut. An SSG (e.g. Eleventy) only where Markdown-owned layout (blog/docs) is genuinely better; the component renderer stays the default.
