@@ -145,8 +145,10 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
       const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
       // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
       if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
-      // cap reasoning for ALL calls — web/no-web — so it can't starve the output token budget
-      body.reasoning = { effort: 'low' };
+      // Fastest reasoning the proxy/model allows (m2.7 requires reasoning; 'minimal' = least thinking,
+      // least latency). The model only WRITES copy — it NEVER decides the stack (CMS choice is forced
+      // deterministically in code, never by the model).
+      body.reasoning = { effort: 'minimal' };
       const res = await fetch(`${OR_BASE}/chat/completions`, {
         method: 'POST',
         headers: {
