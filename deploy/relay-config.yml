@@ -10,4 +10,6 @@ ingress:
     service: http://127.0.0.1:8787
   - hostname: cms.naples.agency
     service: http://127.0.0.1:8055
+  - hostname: drupal.naples.agency
+    service: http://127.0.0.1:8056
   - service: http_status:404
