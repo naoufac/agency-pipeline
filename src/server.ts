@@ -8,6 +8,7 @@ import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
+import { renderLiveFromCms } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 
@@ -98,6 +99,14 @@ const server = http.createServer(async (req, res) => {
       if (/\.tmp$/i.test(rel)) return send(res, 404, 'text/plain', 'not found');   // never serve an unverified republish candidate
       if (rel === '' || rel.endsWith('/')) rel += 'index.html';
       else if (!/\.[a-z0-9]+$/i.test(rel)) rel += '/index.html';
+      // LIVE CMS: render an HTML page fresh from its CMS so content edits show with no rebuild.
+      const live = rel.match(/^([0-9a-f-]{36})\/(.+)\.html$/i);
+      if (live) {
+        try {
+          const html = await renderLiveFromCms(pool, live[1], live[2]);
+          if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(html); return; }
+        } catch (e: any) { console.error('live-cms', live[1], live[2], e?.message ?? e); }   // fall through to static
+      }
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
         const ext = (f.split('.').pop() || '').toLowerCase();
