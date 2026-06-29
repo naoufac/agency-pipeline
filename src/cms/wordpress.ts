@@ -3,23 +3,27 @@
 // (fonts/colours) lives in the THEME's Additional CSS — site-wide, SEPARATE from content — so a user
 // (or the LLM) adding a page is a content+menu op that CANNOT break branding/fonts/navigation.
 // LLM = copywriter only (fast, minimal reasoning). Code does everything structural.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { writeFileSync } from 'node:fs';
 import { llmText } from '../agents.ts';
 
+const pexec = promisify(execFile);
 const HOST = process.env.WP_HOST || 'https://sites.naples.agency';
 
-function wp(args: string[], url?: string): string {
+// async (non-blocking) so the http server stays responsive during a ~minute build.
+async function wp(args: string[], url?: string): Promise<string> {
   const env = ['-e', 'HOME=/tmp', '-e', 'WORDPRESS_DB_HOST=relay-wp-db', '-e', 'WORDPRESS_DB_USER=wp',
     '-e', `WORDPRESS_DB_PASSWORD=${process.env.WP_DB_PW}`, '-e', 'WORDPRESS_DB_NAME=wordpress'];
   const base = ['run', '--rm', '--user', 'root', '--network', 'relay-wp', '--volumes-from', 'relay-wp', ...env,
     'wordpress:cli', 'wp', '--allow-root'];
   const full = url ? [...base, `--url=${url}`, ...args] : [...base, ...args];
-  return execFileSync('docker', full, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  const { stdout } = await pexec('docker', full, { maxBuffer: 20 * 1024 * 1024 });
+  return stdout;
 }
-function put(containerPath: string, content: string): void {
+async function put(containerPath: string, content: string): Promise<void> {
   writeFileSync('/tmp/relay-wp-put', content);
-  execFileSync('docker', ['cp', '/tmp/relay-wp-put', `relay-wp:${containerPath}`]);
+  await pexec('docker', ['cp', '/tmp/relay-wp-put', `relay-wp:${containerPath}`]);
 }
 function extractJson(s: string): any {
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
@@ -46,17 +50,17 @@ Pick brand colours + Google fonts that genuinely fit the brief. Specific, confid
   const slug = (String(spec.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30)) || ('site' + Math.random().toString(16).slice(2, 6));
 
   // 2) Provision an ISOLATED subsite (own theme/branding/content/admin).
-  try { wp(['site', 'create', `--slug=${slug}`, `--title=${spec.site_name || slug}`]); } catch { /* may already exist */ }
+  try { await wp(['site', 'create', `--slug=${slug}`, `--title=${spec.site_name || slug}`]); } catch { /* may already exist */ }
   const url = `${HOST}/${slug}/`;
 
   // 3) Activate the theme (branding/nav live here, not in content).
-  try { wp(['theme', 'enable', 'twentytwentyone', '--network']); } catch {}
-  wp(['theme', 'activate', 'twentytwentyone'], url);
+  try { await wp(['theme', 'enable', 'twentytwentyone', '--network']); } catch {}
+  await wp(['theme', 'activate', 'twentytwentyone'], url);
 
   // 4) Build: branding (Additional CSS, site-wide), pages, front page, menu → nav. Code only.
-  put('/var/www/html/relay-wp-site.json', JSON.stringify(spec));
-  put('/var/www/html/relay-wp-build.php', BUILD_PHP);
-  const out = wp(['eval-file', '/var/www/html/relay-wp-build.php'], url);
+  await put('/var/www/html/relay-wp-site.json', JSON.stringify(spec));
+  await put('/var/www/html/relay-wp-build.php', BUILD_PHP);
+  const out = await wp(['eval-file', '/var/www/html/relay-wp-build.php'], url);
   const res = extractJson(out);
 
   return { slug, siteName: spec.site_name || slug, url, adminUrl: url + 'wp-admin/', pages: res.pages || [] };
@@ -69,9 +73,9 @@ export async function addWordpressPage(slug: string, request: string): Promise<{
   const system = 'You write ONE website page as raw JSON only — no commentary, no markdown.';
   const user = `For the site, write the page the user asked for: "${request}". Return ONLY: {"title":"<page title>","slug":"<url-safe>","content":"<rich HTML using <h2> <p> <ul> <li> <strong> — real specific copy>"}`;
   const p = extractJson(await llmText(system, user, 4000));
-  put('/var/www/html/relay-wp-addpage.json', JSON.stringify(p));
-  put('/var/www/html/relay-wp-addpage.php', ADDPAGE_PHP);
-  const out = wp(['eval-file', '/var/www/html/relay-wp-addpage.php'], url);
+  await put('/var/www/html/relay-wp-addpage.json', JSON.stringify(p));
+  await put('/var/www/html/relay-wp-addpage.php', ADDPAGE_PHP);
+  const out = await wp(['eval-file', '/var/www/html/relay-wp-addpage.php'], url);
   const res = extractJson(out);
   return { url: res.url, title: p.title };
 }

@@ -9,6 +9,7 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { renderLiveFromCms } from './cms/live.ts';
+import { generateWordpressSite } from './cms/wordpress.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 
@@ -47,8 +48,8 @@ const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 't
 
 async function boardJSON(projectId?: string) {
   const p = projectId
-    ? await pool.query('select id, brief, status, created_at from projects where id=$1', [projectId])
-    : await pool.query('select id, brief, status, created_at from projects order by created_at desc limit 1');
+    ? await pool.query('select id, brief, status, params, created_at from projects where id=$1', [projectId])
+    : await pool.query('select id, brief, status, params, created_at from projects order by created_at desc limit 1');
   if (!p.rows.length) return { project: null, tasks: [], edges: [] };
   const proj = p.rows[0];
   const tasks = (await pool.query('select seq, title, department, status from tasks where project_id=$1 order by seq', [proj.id])).rows;
@@ -215,6 +216,27 @@ const server = http.createServer(async (req, res) => {
       const id = await plan(pool, brief);
       // build in-process by default; with RELAY_BUILD=0 the web server only PLANS and a worker builds it
       if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('run', id, e?.message));
+      return send(res, 200, 'application/json', JSON.stringify({ id }));
+    }
+
+    // CMS-NATIVE build: a brief -> a REAL, isolated, branded WordPress site (its own theme + admin).
+    if (path === '/api/cms-run' && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
+      let raw = ''; for await (const c of req) raw += c;
+      let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
+      if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
+      const params = { engine: 'wordpress', planner: 'cms', cms_status: 'building' };
+      const pr = await pool.query('insert into projects(brief, params, status) values ($1,$2,$3) returning id', [brief, params, 'running']);
+      const id = pr.rows[0].id;
+      // build the real branded site async — never blocks the request
+      generateWordpressSite(brief).then((s) =>
+        pool.query("update projects set status='done', params = params || $2::jsonb where id=$1",
+          [id, JSON.stringify({ cms_status: 'done', wp_url: s.url, wp_admin: s.adminUrl, slug: s.slug, site_name: s.siteName })])
+      ).catch((e: any) =>
+        pool.query("update projects set status='blocked', params = params || $2::jsonb where id=$1",
+          [id, JSON.stringify({ cms_status: 'failed', error: String(e?.message ?? e).slice(0, 300) })]).catch(() => {})
+      );
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 

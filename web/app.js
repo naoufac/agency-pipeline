@@ -45,7 +45,7 @@ function briefBar(){
   return `<section class="hero compact">
     <span class="eyebrow">● live · autonomous</span>
     <h1>What should we build?</h1>
-    <p class="lead">Describe it in a sentence. Relay builds a real, working website you can open.</p>
+    <p class="lead">Describe it in a sentence. Relay builds a real, branded CMS website you can log into and edit.</p>
     <div class="brief-bar">
       <input id="brief" class="input" placeholder='Describe the site you want — e.g. "a one-page site explaining our pricing"' />
       <button id="go" class="btn">Build my site →</button>
@@ -53,8 +53,8 @@ function briefBar(){
 }
 async function submitBrief(){
   const input = document.getElementById('brief'); const brief = input.value.trim(); if (!brief) return;
-  const btn = document.getElementById('go'); btn.textContent = 'Planning…'; btn.disabled = true;
-  try { const r = await j('/api/run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
+  const btn = document.getElementById('go'); btn.textContent = 'Building your CMS site…'; btn.disabled = true;
+  try { const r = await j('/api/cms-run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
         location.hash = '#/p/' + r.id; } catch { btn.textContent = 'Build my site →'; btn.disabled = false; }
 }
 // one card's inner HTML — STABLE preview URL (no cache-bust → browser caches it, never re-fetches)
@@ -319,9 +319,43 @@ function project(id, tab, seq){
       </div>`).join('');
   }
 
+  // CMS-native (WordPress) project — its own self-contained view (branded site + admin).
+  function wpView(b){
+    const pm = b.project.params || {};
+    const st = pm.cms_status || 'building';
+    const live = st === 'done' && pm.wp_url;
+    document.getElementById('phead').innerHTML = `
+      <div class="phead">
+        <a class="back" href="#/">‹ Your sites</a>
+        <h1 class="ptitle">${esc(b.project.brief)}</h1>
+        <span class="pill big"><i class="dot s-${live?'done':st==='failed'?'failed':'running'}"></i>${live?'Live':st==='failed'?'Failed':'Building'}</span>
+        ${live?`<a class="btn btn-sm" target="_blank" rel="noopener" href="${pm.wp_url}">Open ↗</a>`:''}
+      </div>`;
+    const body = document.getElementById('pbody');
+    if (live){
+      body.innerHTML = `
+        <div class="frame"><div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="addr">${pm.wp_url}</span></div><iframe src="${pm.wp_url}" title="site"></iframe></div>
+        <div class="actionbar">
+          <a class="btn" target="_blank" rel="noopener" href="${pm.wp_url}">Open site ↗</a>
+          <a class="btn btn-ghost" target="_blank" rel="noopener" href="${pm.wp_admin}">Edit in CMS admin ↗</a>
+          <span class="muted" style="margin-left:auto;font-size:13px">${esc(pm.site_name||'')} — a real CMS · edit content in the admin; branding &amp; navigation stay intact</span>
+        </div>`;
+      if (!wasBuilt) toast('✓ Done — your CMS site is live');
+      wasBuilt = true; clearPoll();
+    } else if (st === 'failed'){
+      body.innerHTML = `<div class="empty" style="text-align:left"><h3 style="margin-bottom:8px">Couldn’t build this one.</h3><p class="muted">${esc(pm.error||'')}</p><a class="btn btn-sm" href="#/" style="margin-top:14px">‹ Back to your sites</a></div>`;
+      clearPoll();
+    } else {
+      body.innerHTML = `<div class="card progress"><div class="bar"><i style="width:45%"></i></div>
+        <div class="phasefeed"><div class="phase done"><span class="mk">✓</span>Brief understood</div><div class="phase run"><span class="mk">●</span>Branding · pages · navigation</div><div class="phase"><span class="mk">○</span>Publishing your CMS site</div></div>
+        <div class="muted" style="margin-top:16px;font-size:13px">Building a real, branded CMS site you can log into and edit — about a minute…</div></div>`;
+    }
+  }
+
   async function load(){
     let b; try { b = await j('/api/board?id=' + id); } catch { return; }
     if (!b.project){ app.innerHTML = `<div class="container section"><div class="empty">Project not found. <a href="#/">‹ Your sites</a></div></div>`; clearPoll(); return; }
+    if (b.project.params && b.project.params.engine === 'wordpress') { wpView(b); return; }
     if (!prow.id) { try { prow = (await j('/api/projects')).find(p => p.id === id) || {}; } catch {} }
     const built = !!b.site;
     // while-building auto-promotion: if no explicit tab and still building -> show build narration on Site
