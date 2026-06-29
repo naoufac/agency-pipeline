@@ -6,6 +6,7 @@ import { runAgentTracked, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
+import { cmsFinalize } from './cms/finalize.ts';
 import { renderPage } from './render.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
@@ -275,8 +276,14 @@ export async function runLoop(
   // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
   // (it would keep a short-lived process alive and isn't wanted for offline tests).
   if (done && opts.review) {
-    reviewSite(pool, projectId).catch(() => {});            // visual QA + board thumbnail
-    dogfoodSite(pool, projectId).catch(() => {});           // interaction QA: a real browser uses the site
+    // CMS-NATIVE: re-serve every finished site THROUGH its selected CMS (params.cms → adapter), gated
+    // by served_from_cms. Guarded + additive: if the CMS is down it logs cms_build_failed and the
+    // static build stands (never breaks a build). Runs BEFORE QA so QA judges the CMS-served pages.
+    (async () => {
+      try { await cmsFinalize(pool, projectId); } catch (e: any) { console.error('cmsFinalize', projectId, e?.message ?? e); }
+      reviewSite(pool, projectId).catch(() => {});          // visual QA + board thumbnail
+      dogfoodSite(pool, projectId).catch(() => {});         // interaction QA: a real browser uses the site
+    })();
   }
   return { stopped: done ? 'complete' : 'blocked', steps };
 }

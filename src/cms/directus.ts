@@ -7,7 +7,9 @@
 // (Directus collection-level multi-tenancy). See docs/CMS-ARCHITECTURE.md.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { renderPage } from '../render.ts';
+import { processMedia } from '../media.ts';
 import { servedPath, brandFor, heroHeadline } from './util.ts';
 import type { CmsTarget, CmsInstance, SiteModel, BuildCtx } from './types.ts';
 
@@ -100,8 +102,11 @@ export const directus: CmsTarget = {
       if (!row) throw new Error(`directus buildAndServe: no CMS row for ${page.slug}`);
       const spec = { brand: brandFor(model), sections: row.sections };
       const html = renderPage(spec, { pages: navPages, slug: page.slug, title: row.title || page.title, projectId: ctx.projectId, theme: ctx.theme });
+      // localize any remote images into the site dir (gate-safe), best-effort.
+      let body = html;
+      try { body = await processMedia(html, pathToFileURL(dir + path.sep)); } catch { /* image-light page or no key: ship as-is */ }
       // provenance: ties this served file to the exact CMS document it was rendered from.
-      const stamped = `<!--relay:cms=directus doc=${row.id}-->\n` + html;
+      const stamped = `<!--relay:cms=directus doc=${row.id}-->\n` + body;
       writeFileSync(servedPath(ctx, page.slug), stamped);
       out[page.slug] = servedPath(ctx, page.slug);
     }
