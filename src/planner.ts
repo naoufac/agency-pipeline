@@ -64,10 +64,18 @@ function validate(plan: any, brief: string): Plan | null {
   // LANDING (PLAN.md M1): exactly ONE page — the conversion page. Forced here, gated in site_model.
   if (shape === 'landing') pages = [pages[0]];
   // STORE (PQ2): a store must be able to SELL — guarantee cart + checkout pages exist (shop lives on
-  // index or a shop page; the products grid is guaranteed at compose time).
+  // index or a shop page; the products grid is guaranteed at compose time). The page cap must NEVER
+  // evict the sell pages (it once cut checkout from a 5-page plan: the cart's Proceed button 404'd and
+  // the store could not sell) — brochure pages are trimmed FIRST, then cart/checkout are injected.
+  // checkout is matched by its EXACT slug: the cart runtime's Proceed button targets checkout.html
+  // literally, so only a page slugged "checkout" satisfies the contract (site_model gates this too).
   if (archetype === 'store' && shape !== 'landing') {
-    if (!pages.some(p => /cart|basket|bag/.test(p.slug))) pages.push({ slug: 'cart', title: 'Cart' });
-    if (!pages.some(p => /checkout/.test(p.slug))) pages.push({ slug: 'checkout', title: 'Checkout' });
+    const hasCart = pages.some(p => /cart|basket|bag/.test(p.slug));
+    const hasCo = pages.some(p => p.slug === 'checkout');
+    const need = (hasCart ? 0 : 1) + (hasCo ? 0 : 1);
+    if (need) pages = pages.slice(0, 6 - need);
+    if (!hasCart) pages.push({ slug: 'cart', title: 'Cart' });
+    if (!hasCo) pages.push({ slug: 'checkout', title: 'Checkout' });
     pages = pages.slice(0, 6);
   }
 

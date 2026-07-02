@@ -137,6 +137,32 @@ try {
   ok('renderLivePdp keeps the site chrome (nav + one logo)', !!lp && (lp.match(/class="nav-brand"/g) || []).length === 1 && lp.includes('>Shop<'));
   ok('renderLivePdp back-links to the page carrying the shop grid', !!lp && lp.includes('href="shop.html"'));
   ok('renderLivePdp answers null for a product that does not exist', (await renderLivePdp(pool, id, 424242)) === null);
+
+  // ---- a store the system marks buildable MUST be able to SELL (the checkout-eviction class) ----
+  // site_model is the deterministic gate every composed model passes through — prove it rejects a
+  // store whose checkout page is missing (the planner cap once evicted it: Proceed button 404'd,
+  // buy-probe silently skipped, a store that cannot sell shipped "clean") and accepts a complete one.
+  const { verify } = await import('./verify.ts');
+  const mkPages = (withCheckout: boolean) => {
+    const p = [
+      { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Kiln' }, { type: 'form', table: 'products' }] },
+      { slug: 'shop', title: 'Shop', sections: [{ type: 'hero', headline: 'Shop' }, { type: 'products', table: 'products' }] },
+      { slug: 'cart', title: 'Cart', sections: [{ type: 'hero', headline: 'Cart' }, { type: 'cart' }] },
+    ];
+    if (withCheckout) p.push({ slug: 'checkout', title: 'Checkout', sections: [{ type: 'hero', headline: 'Checkout' }, { type: 'checkout' }] } as any);
+    return p;
+  };
+  const setModel = (withCheckout: boolean) => pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify({
+    archetype: 'store', shape: 'multi', theme: 'warm',
+    pages: mkPages(withCheckout).map(({ slug, title }) => ({ slug, title })),
+    site: { pages: mkPages(withCheckout) },
+    brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } } })]);
+  await setModel(true);
+  const good = await verify(pool, { verify: 'site_model', project_id: id }, '');
+  ok('site_model accepts a complete store (cart + checkout pages)', good.ok === true, good.log);
+  await setModel(false);
+  const bad = await verify(pool, { verify: 'site_model', project_id: id }, '');
+  ok('site_model REJECTS a store missing its checkout page', bad.ok === false && /checkout/.test(bad.log), bad.log);
 }
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e);

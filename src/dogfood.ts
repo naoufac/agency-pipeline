@@ -111,7 +111,11 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
     // STORE PROBE (PQ2): a real browser BUYS — add 2 products to the cart, check out, and prove the
     // order + line items landed in the database. Runs only on store builds (checkout page present).
     const params2 = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
-    const coPage = pages.find((p: any) => /checkout/.test(String(p.slug)));
+    const coPage = pages.find((p: any) => String(p.slug) === 'checkout') || pages.find((p: any) => /checkout/.test(String(p.slug)));
+    // a store WITHOUT a checkout page cannot sell — that is a loud verdict, never a silently skipped
+    // probe (a checkout-less store once shipped "clean" because this probe just didn't run)
+    if (params2.archetype === 'store' && params2.shape !== 'landing' && !coPage)
+      issues.push({ page: '(site)', viewport: 'desktop', kind: 'store-broken', detail: "this store has NO checkout page — the cart's Proceed button has nowhere to go and the store cannot sell", severity: 'high' });
     if (params2.archetype === 'store' && coPage) {
       // Find the shop page by WHERE THE PRODUCTS GRID ACTUALLY IS (the composed model), not by guessing
       // the slug — the LLM may name it menu/lineup/collection. This keeps the probe consistent with the

@@ -189,16 +189,21 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
       const hasForm = ps.some((p: any) => (p.sections || []).some((s: any) => s.type === 'form' && typeof s.table === 'string' && s.table));
       if (!hasForm) return { ok: false, log: 'an app/store site must include at least one {"type":"form","table":...} section — the core action (booking/ordering/signing up) has to be a REAL working form' };
     }
-    // STORE gate (PQ2): a store must actually SELL — products grid somewhere, a cart on the cart
-    // page, a checkout on the checkout page (normalizeSite injects them; this asserts nothing slipped).
-    if (String(r.rows[0]?.archetype) === 'store') {
+    // STORE gate (PQ2): a store must actually SELL — products grid somewhere, a CART page and a
+    // CHECKOUT page must EXIST (the planner's page cap once evicted checkout: the cart's Proceed
+    // button 404'd and the reviewer's buy-probe silently skipped — a store that cannot sell shipped
+    // "clean"), and each must carry its section. checkout is matched by its EXACT slug because the
+    // cart runtime targets checkout.html literally.
+    if (String(r.rows[0]?.archetype) === 'store' && r.rows[0]?.shape !== 'landing') {
       if (!ps.some((p: any) => (p.sections || []).some((x: any) => x.type === 'products')))
         return { ok: false, log: 'a store must include a {"type":"products"} shop grid section' };
       const cartP = ps.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
-      if (cartP && !(cartP.sections || []).some((x: any) => x.type === 'cart'))
+      if (!cartP) return { ok: false, log: 'a store must have a cart page — without it the store cannot sell' };
+      if (!(cartP.sections || []).some((x: any) => x.type === 'cart'))
         return { ok: false, log: `the "${cartP.slug}" page must carry a {"type":"cart"} section` };
-      const coP = ps.find((p: any) => /checkout/.test(String(p.slug)));
-      if (coP && !(coP.sections || []).some((x: any) => x.type === 'checkout'))
+      const coP = ps.find((p: any) => String(p.slug) === 'checkout');
+      if (!coP) return { ok: false, log: 'a store must have a page slugged exactly "checkout" — the cart\'s Proceed button targets checkout.html, so without it the store cannot sell' };
+      if (!(coP.sections || []).some((x: any) => x.type === 'checkout'))
         return { ok: false, log: `the "${coP.slug}" page must carry a {"type":"checkout"} section` };
     }
     // LANDING gate (PLAN.md M1): exactly one page, >=2 conversion sections, final section is the CTA.
