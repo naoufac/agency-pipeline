@@ -134,7 +134,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // (a page or an in-page anchor), and every form must be wired to submit.
     const dead = (raw.match(/<a\b[^>]*class="btn"[^>]*>/gi) || []).filter(b => !/href="/i.test(b) || /href="#"/i.test(b) || /href=""/i.test(b)).length;
     if (dead) return { ok: false, log: `${dead} dead CTA button(s) (href="#"/empty) — a button must go somewhere` };
-    const unwired = (raw.match(/<form\b[^>]*>/gi) || []).filter(f => !/onsubmit="return relaysubmit/i.test(f) && !/\baction=/i.test(f)).length;
+    const unwired = (raw.match(/<form\b[^>]*>/gi) || []).filter(f => !/onsubmit="return relay(submit|checkout)/i.test(f) && !/\baction=/i.test(f)).length;
     if (unwired) return { ok: false, log: `${unwired} form(s) not wired to submit` };
     // ONE website = ONE nav = ONE logo. A duplicated nav/logo is the most visible "the system is broken"
     // defect there is; it is now a hard, always-on gate so a page can never ship with it.

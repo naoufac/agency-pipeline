@@ -27,6 +27,9 @@ ok('cart section renders the cart container', cart.includes('data-cart="full"'))
 const co = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'hero', headline: 'Checkout' }, { type: 'checkout', title: 'Checkout' }] }, { pages, slug: 'checkout', title: 'Checkout' });
 ok('checkout renders buyer form + summary', co.includes('data-cart="summary"') && co.includes('relayCheckout') && co.includes('name="customer_name"'));
 ok('checkout posts to the ORDER endpoint (server-priced)', co.includes("/order'"));
+// the render gate's wiring regex must accept the checkout form (regression: a live store build
+// blocked because site_renders only knew relaySubmit)
+ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="return relay(submit|checkout)/i.test(co));
 
 // store guarantee: a composed model that FORGOT the store sections gets them injected
 {
