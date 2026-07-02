@@ -30,6 +30,18 @@ is ever reintroduced.
 - **Done = a deterministic external check passes**: the live site is genuinely served from the CMS
   and content reads back through it. Never an agent's word, never a self-report, never a label.
 
+## Definition of DONE — corrected 2026-07-02 (owner called out inflated "done"s)
+Passing a narrow mechanical gate is NOT done. Earlier milestones were marked "Shipped" because a
+sentinel round-tripped or a form field matched a column — while the actual OUTPUT was one template
+recolored across every brief, an ecommerce store that cannot sell, and a CMS that is an opaque JSON
+blob. That is "work in progress", not success.
+
+**A capability is DONE only when a demanding agency creative director would hand the produced site
+to a paying client** — proven on REAL produced output, not on pipeline mechanics. Concretely:
+distinct design per brief (not a recolor), working end-to-end flows (a store can actually sell), a
+CMS a non-technical client can actually edit. Gates must measure THAT. No monetization, no "sells
+itself", until the product clears this bar. See `PLAN.md` → Production Quality track.
+
 ## Standing decisions
 - The WordPress/WooCommerce "CMS-native" generator (`/api/cms-run`) is retired (HTTP 410). The six
   WP sites it shipped keep serving frozen from their container; the board renders them read-only.

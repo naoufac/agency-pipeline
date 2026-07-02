@@ -63,14 +63,51 @@ sits silently on the dashboard). Nobody has to go looking.
 **Machine gate:** a sent-mail record is written and verified per notification; the stuck-project
 alert fires on the `project_stuck` event (dead-letter test proves it).
 
-## M6 · The agency sells itself
-**You get:** a pricing page — e.g. Landing $199 / Site $399 / App $999 — with Stripe checkout.
-A stranger pays, gets an account, submits their brief, and watches their product build. Money in,
-product out, zero humans.
-**Phone check:** open the board logged out → Pricing → pay with a test card on your phone → you're
-signed in with a live building project.
-**Machine gate:** the Stripe webhook (idempotent) creates the account + entitlement; unpaid
-accounts cannot build; an automated test-mode purchase runs end-to-end on every deploy.
+## ⛔ M6 (market/pricing) — DROPPED 2026-07-02
+The owner was right: rushing to monetization while the product cannot produce one working full-stack
+site, shows one boring design everywhere, and has broken buttons is exactly the old backsliding.
+No selling until the output is agency-grade. It is also FREE — no Stripe. Replaced by:
+
+---
+
+# PRODUCTION QUALITY — the real work (honest reset, 2026-07-02)
+
+M1–M5 built real PLUMBING (pipeline, schema-forms, data-preserving rebuilds, sign-in/ownership,
+lead + stuck alerts) and those hold. But produced OUTPUT is not agency-grade. Three structural
+failures, each verified on real sites, each its own milestone. Nothing here is "done" until it
+passes on REAL produced output — a demanding creative director's bar, not a mechanical gate.
+
+## PQ0 · Buttons that go somewhere real ✅ (2026-07-02)
+Fixed the resolver that collapsed every CTA to the home page (and made home-page buttons reload).
+Now CTAs route to the relevant page / action page / on-page conversion anchor, never circular.
+Gate: dogfood flags circular and all-same-target buttons. Proven on the delivery app that had shipped
+all-index buttons.
+
+## PQ1 · Distinct design per brief
+**You get:** two different businesses no longer look like the same page recolored. Real compositional
+variety — multiple hero treatments, nav styles, section rhythms/layouts chosen from the brief.
+**Phone check:** build a law firm and a skate shop → open both → they look like different studios made
+them, not the same template in different colours.
+**Machine gate:** an automated check that several briefs yield structurally different layouts
+(different hero type, section order, nav) — plus a visual critique pass.
+
+## PQ2 · Ecommerce that actually sells
+**You get:** a store you can actually buy from — product detail (price, options, add-to-cart), a real
+cart (line items, quantities, total, remove), a checkout that writes a real order.
+**Phone check:** open a store → open a product → add two to cart → change a quantity → check out →
+you get a confirmation and the order is real.
+**Machine gate:** a browser adds 2 products, edits quantity, checks out; the order + line items land
+in the database; totals are correct.
+
+## PQ3 · A CMS a client can actually use
+**You get:** per-site content collections in Directus (Products, Menu, Posts, Team…) a non-technical
+client can edit, with changes appearing live — not one opaque "pages" JSON row.
+**Phone check:** open the CMS admin for a site → edit a product's price → refresh the site → it changed.
+**Machine gate:** create/edit a record in a per-site collection and assert it renders live.
+
+## PQ4 · Free self-serve (only after PQ1–PQ3)
+Anyone signs up and builds, free. Accounts + ownership already shipped (M4); this just opens the door
+once the product is worth it.
 
 ---
 
