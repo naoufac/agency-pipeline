@@ -299,3 +299,18 @@ FS4 redemption of the two facade briefs. Full track with phone checks + machine 
 Key safeguards locked: ref_token additive-migration backfill hazard (nullable + partial unique +
 random backfill, proven in migrate:check); probes never send real mail; bidirectional token gate;
 capacity-aware uniqueness detection. NEXT: implement FS0.
+
+## 2026-07-03 (early) — FS0 SHIPPED + PROVEN (honest app surface)
+Commits 25da233 · 96f7e3b · e1f3a61 · 9f416be, all deployed (prod HEAD 9f416be, 10 suites green).
+Four zero-touch rebuild rounds of the barbershop brief drove the loop, each exposing + fixing a class:
+(1) facade dashboard dropped at plan time (FACADE_PAGE closed set; plan_repair event; site_model +
+reviewer belts). (2) PRIVATE_READ audience guard: bookings/orders/users… answer [] publicly — sealed
+the live PII leak on EVERY already-built site at deploy (verified pre-rebuild on the old barbershop;
+store orders were publicly listable too). Owner content admin unaffected (audience='owner').
+(3) CTAs: cross-page buttons land AT the form (formSlug threaded through all 5 render paths →
+book.html#contact-form); the form's own page anchors to itself (no bounce-to-home); reviewer
+home-collapse recalibrated (legitimate when home hosts the action). (4) Visitor-fillable "Status"
+field killed: SYSTEM_COLS hidden from public formColumns + ignored by public insertRow (a crafted
+POST cannot set status=confirmed); owner keeps both. Final verdict: PASSED 0 high; book page =
+real barber/service records with photos + clean booking form. NEXT: FS1 (receipt: readScoped +
+ref_token + confirmation + find-my-booking — mind the migration backfill hazard in PLAN.md).

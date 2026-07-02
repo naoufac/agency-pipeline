@@ -157,7 +157,14 @@ Design doctrine (unchanged): one new primitive at a time, forced in deterministi
 browser probe as unforgeable as the store's buy-probe. Hero art-direction + polish picks stay
 queued behind this track.
 
-## FS0 · Honest app surface — no facades, no public dumps, a probe on every build
+## FS0 · Honest app surface — no facades, no public dumps, a probe on every build ✅ (2026-07-02)
+**Shipped + proven zero-touch** on the barbershop brief (4c89fc1f, 3 rebuild rounds, reviewer PASSED
+0 high): facade "dashboard" dropped loudly at plan time (plan_repair event); bookings publicly
+sealed ({"rows":[]}) — the server-side guard protected every already-built site at deploy; the
+visitor-fillable "Status" field killed (system-owned columns hidden from public forms + ignored on
+crafted POSTs); CTAs land AT the form from any page (cross-page anchor) and scroll to it on the
+page that hosts it. app:check (66) joined npm run check (10 suites). The reviewer now proves
+privacy live after its own submission and flags facade pages on legacy sites.
 **You get:** an app page may only exist if the system can wire it to something real (closed-set page
 roles; "dashboard/portal/track" either map to a real capability or are dropped loudly — never
 rendered as fiction). The core action form is force-injected from the schema (retiring the
