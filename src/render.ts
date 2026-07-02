@@ -68,6 +68,9 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     // home" bug. Redirect to the best OTHER action page, else the first different page. On a genuine
     // one-page site (landing) an on-page anchor to the final CTA/form is the only sensible target.
     if (target === ctx.slug) {
+      // the page that HOSTS the site's form keeps its own CTAs: "Book now" in the hero scrolls to
+      // the form below, it never bounces the visitor to another page (the book-page-to-home class)
+      if (ctx.formSlug && ctx.formSlug === ctx.slug) return onPageAnchor;
       const other = (actionPage && actionPage.slug !== ctx.slug ? actionPage : pgs.find((p: any) => p.slug !== ctx.slug));
       if (other) target = other.slug;
       else return onPageAnchor;   // single-page site: jump to the real conversion section, never a reload

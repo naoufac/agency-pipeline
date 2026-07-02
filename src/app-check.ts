@@ -69,6 +69,15 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
       { type: 'cta', headline: 'Ready for a fresh cut?', cta: 'Book your slot' }] },
     { pages: site.pages.map(p => ({ slug: p.slug, title: p.title })), slug: 'barbers', title: 'Barbers', formSlug: 'index' });
   ok('cross-page CTAs land AT the form (anchor), never a bare home reload', barbers.includes('href="index.html#contact-form"') && !/class="btn" href="index\.html"/.test(barbers), (barbers.match(/class="btn" href="[^"]*"/g) || []).join(' '));
+  // the page HOSTING the form: its own CTAs scroll to the form, never bounce to another page
+  const book = renderPage(
+    { brand: { name: 'Chop', tokens: {}, cta: 'Book now' }, sections: [
+      { type: 'hero', headline: 'Your chair is ready', cta: 'Book now' },
+      { type: 'form', table: 'bookings', form: 'bookings' },
+      { type: 'cta', headline: 'Walk-ins welcome', cta: 'Reserve a slot' }] },
+    { pages: [{ slug: 'index', title: 'Home' }, { slug: 'book', title: 'Book' }], slug: 'book', title: 'Book',
+      forms: { bookings: [{ name: 'customer_name', type: 'text', nullable: false }] }, formSlug: 'book' });
+  ok('the form page\'s own CTAs anchor to its form (no bounce to home)', book.includes('class="btn" href="#contact-form"') && !/class="btn" href="index\.html/.test(book), (book.match(/class="btn" href="[^"]*"/g) || []).join(' '));
 }
 
 // ---- PRIVACY layer (real scratch schema) ----
