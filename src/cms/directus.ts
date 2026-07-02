@@ -67,14 +67,19 @@ export const directus: CmsTarget = {
     return { types: [COLLECTION] };
   },
 
-  // Upsert each page (keyed by project_id+slug) as a real CMS document.
+  // Upsert each page (keyed by project_id+slug) as a real CMS document. The CMS holds REAL content:
+  // the internal {{brand}} token is substituted with the locked name BEFORE storing (an editor must
+  // see "Sign in to Acme", never a template token — and the servedFromCms gate compares CMS fields
+  // against served text, so a stored token can never match).
   async pushContent(_inst: CmsInstance, model: SiteModel, ctx: BuildCtx): Promise<{ ids: Record<string, string[]> }> {
     const ids: Record<string, string[]> = { [COLLECTION]: [] };
+    const name = String(brandFor(model)?.name || 'Studio');
+    const fill = <T>(v: T): T => JSON.parse(JSON.stringify(v).replace(/\{\{\s*brand\s*\}\}/gi, JSON.stringify(name).slice(1, -1)));
     for (const page of model.pages) {
-      const title = heroHeadline(page);
+      const title = fill(heroHeadline(page));
       const found = await dx('GET', byProjectSlug(ctx.projectId, page.slug));
       const row = found?.data?.[0];
-      const payload = { project_id: ctx.projectId, slug: page.slug, title, sections: page.sections };
+      const payload = { project_id: ctx.projectId, slug: page.slug, title, sections: fill(page.sections) };
       let id: any;
       if (row) { await dx('PATCH', `/items/${COLLECTION}/${row.id}`, payload); id = row.id; }
       else { const r = await dx('POST', `/items/${COLLECTION}`, payload); id = r.data.id; }
