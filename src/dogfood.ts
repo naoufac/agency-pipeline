@@ -113,7 +113,14 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
     const params2 = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
     const coPage = pages.find((p: any) => /checkout/.test(String(p.slug)));
     if (params2.archetype === 'store' && coPage) {
-      const shopPage = pages.find((p: any) => /shop|store|product|catalog/.test(String(p.slug))) || pages[0];
+      // Find the shop page by WHERE THE PRODUCTS GRID ACTUALLY IS (the composed model), not by guessing
+      // the slug — the LLM may name it menu/lineup/collection. This keeps the probe consistent with the
+      // products-grid injection (which also accepts those names). Slug regex + pages[0] are fallbacks.
+      const modelPages: any[] = (params2.site && Array.isArray(params2.site.pages)) ? params2.site.pages : [];
+      const withProducts = modelPages.find((p: any) => (p.sections || []).some((s: any) => s.type === 'products'));
+      const shopPage = (withProducts && pages.find((p: any) => p.slug === withProducts.slug))
+        || pages.find((p: any) => /shop|store|product|catalog|menu|lineup|collection/.test(String(p.slug)))
+        || pages[0];
       const sch2 = appdb.schemaName(projectId);
       const oCount = async () => { try { return Number((await pool.query(`select count(*)::int n from "${sch2}"."orders"`)).rows[0].n); } catch { return -1; } };
       try {
