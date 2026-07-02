@@ -76,6 +76,33 @@ try {
   await appdb.provision(pool, other, JSON.stringify({ entities: [{ name: 'notes', fields: [{ name: 'body', type: 'text' }] }] }));
   ok('non-store site refuses orders honestly', /no store/.test((await appdb.placeOrder(pool, other, { customer_name: 'A', email: 'a@b.co' }, [{ id: 1, qty: 1 }])).error || ''));
   await pool.query(`drop schema if exists "${appdb.schemaName(other)}" cascade`).catch(() => {});
+  // ---- ROW IMAGE ENRICHMENT (agency-grade cards) ----
+{
+  const { rowQuery, localRowImage } = await import('./rowmedia.ts');
+  ok('rowQuery uses the product name', rowQuery('products', { title: 'Terracotta Mug' }) === 'terracotta mug');
+  ok('rowQuery falls back to the table noun', rowQuery('menu_items', {}) === 'menu items');
+  // an already-real image column suppresses enrichment (no override)
+  ok('existing image URL wins (no _image override)', localRowImage(id, 'products', { title: 'X', image: '/sites/x/assets/a.jpg' }) === null);
+  // no cached file on disk -> no _image (readRows stays clean)
+  ok('no cached photo -> no _image attached', localRowImage(id, 'products', { title: 'Nonexistent Widget 9j2' }) === null);
+  // write a cached file where localRowImage expects it, then prove attach + readRows surfacing
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const SITES2 = new URL('../sites/', import.meta.url);
+  const hashName = (localRowImage as any); // recompute via the module's own naming by reading the returned path
+  // insert a product, compute its expected asset path from rowQuery, drop a file there, re-read
+  await appdb.insertRow(pool, id, 'products', { title: 'CachedShot Mug', price: 12 });
+  const prod = (await appdb.readRows(pool, id, 'products', 50)).find((r) => r.title === 'CachedShot Mug');
+  ok('fresh product has no _image yet', !prod._image);
+  // derive the asset dir + drop a byte file at the deterministic name (mirror rowmedia: assets/row-<fnv>.jpg)
+  function fnv(x){let h=0x811c9dc5;for(let i=0;i<x.length;i++){h^=x.charCodeAt(i);h=Math.imul(h,0x01000193)}return (h>>>0).toString(36)}
+  const rel = 'assets/row-' + fnv('cachedshot mug') + '.jpg';
+  const dir = fileURLToPath(new URL(id + '/assets/', SITES2)); mkdirSync(dir, { recursive: true });
+  writeFileSync(fileURLToPath(new URL(id + '/' + rel, SITES2)), Buffer.alloc(2000, 7));
+  const prod2 = (await appdb.readRows(pool, id, 'products', 50)).find((r) => r.title === 'CachedShot Mug');
+  ok('readRows attaches _image when the cached file exists', prod2._image === '/sites/' + id + '/' + rel, String(prod2._image));
+  await pool.query(`delete from "${schema}"."products" where title='CachedShot Mug'`).catch(()=>{});
+}
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e);
 } finally {

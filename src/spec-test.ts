@@ -378,5 +378,14 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('CTA: one-page site → #contact-form anchor, not index reload', s3.includes('href="#contact-form"') || !/<a class="btn[^"]*" href="index\.html"/.test(s3));
 }
 
+
+// ---- hero grey-void fix: on-image only when a photo is present ----
+{
+  const withImg = renderPage({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#123' } }, sections: [{ type: 'hero', image: 'city', headline: 'Hi' }, { type: 'features', items: [{ title: 'a', body: 'b' }] }] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false } });
+  ok('hero WITH image uses on-image (white text) + a fallback bg exists', /<header class="hero on-image"/.test(withImg) && withImg.includes('.hero.on-image{background:'));
+  const noImg = renderPage({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#123' } }, sections: [{ type: 'hero', headline: 'Hi' }, { type: 'features', items: [{ title: 'a', body: 'b' }] }] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false } });
+  ok('hero WITHOUT image is NOT on-image (legible on brand bg, no grey void)', /<header class="hero"/.test(noImg) && !/<header class="hero on-image"/.test(noImg));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

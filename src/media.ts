@@ -23,6 +23,18 @@ async function pexels(query: string, portrait: boolean): Promise<string | null> 
   } catch { return null; }
 }
 
+// Fetch ONE real photo's bytes for a query (licensed Pexels, existing photos only). Shared by the
+// static media pass and the DB-row enrichment (rowmedia.ts). Returns null on any miss.
+export async function pexelsPhoto(query: string, portrait: boolean): Promise<Buffer | null> {
+  const url = await pexels(query, portrait);
+  if (!url) return null;
+  try {
+    const resp = await fetch(url); if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return buf.length >= 1000 ? buf : null;
+  } catch { return null; }
+}
+
 // Swap every <img ... data-q="QUERY" ...> for a real local photo. Returns rewritten html.
 export async function processMedia(html: string, dirUrl: URL): Promise<string> {
   if (!KEY) return html.replace(/<img\b[^>]*\bdata-q\b[^>]*>/gi, '');  // no key -> drop placeholders

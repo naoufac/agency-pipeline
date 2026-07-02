@@ -41,6 +41,9 @@ p{margin:0 0 1rem}
 .hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
 .hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.34),rgba(0,0,0,.58));z-index:1}
 .hero .container{position:relative;z-index:2}
+/* on-image = white text; a dark brand-tinted gradient sits UNDER the photo so if the photo ever fails
+   to load, the hero is an intentional dark branded panel (white text stays legible) — never a grey void */
+.hero.on-image{background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 68%,#0b1220),#0b1220)}
 .hero.on-image,.hero.on-image h1{color:#fff}.hero.on-image .lead{color:rgba(255,255,255,.92)}.hero.on-image .eyebrow{color:#fff;opacity:.9}
 .hero-inner{max-width:720px;padding:clamp(84px,14vw,184px) 0}
 .hero .lead{margin:1rem 0 2rem}.hero .btn{font-size:1.05rem}
@@ -185,8 +188,10 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       ${s.image ? `<div class="hero-wide">${q(s.image, 'hero-photo')}</div>` : ''}
       <div class="hero-foot">${lead}${cta}</div>
     </div></header>`;
-    // image (default): full-bleed photo + overlay
-    return `<header class="hero on-image">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
+    // image (default): full-bleed photo + overlay. The `on-image` (white text) treatment is applied
+    // ONLY when a photo is actually present — otherwise the hero is a clean, legible typographic hero
+    // on the brand bg (never a grey void when Pexels returns nothing).
+    return `<header class="hero${s.image ? ' on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
       <div class="container"><div class="hero-inner">${copy}</div></div></header>`;
   },
   // STORE (PQ2) · products — a real shop grid: cards load from the live products table and each

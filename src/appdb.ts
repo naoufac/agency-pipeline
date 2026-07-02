@@ -5,6 +5,7 @@
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
 import { parseModel, compile, lit } from './schema.ts';
+import { localRowImage } from './rowmedia.ts';
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;            // a legal, safe SQL identifier (no quoting tricks)
 
@@ -278,7 +279,13 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
       for (const r of rows) { r[label] = map.get(r[fk.col]) ?? null; delete r[fk.col]; }
     }
   } catch {}
-  return rows.map((row: any) => { const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k]; return o; });
+  return rows.map((row: any) => {
+    const o = { ...row }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k];
+    // agency-grade cards: attach the row's cached local photo when one exists and no real image column
+    // is already populated (deterministic file lookup, no network — see rowmedia.ts).
+    const img = localRowImage(projectId, table, o); if (img) o._image = img;
+    return o;
+  });
 }
 
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.

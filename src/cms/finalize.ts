@@ -28,6 +28,15 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
   const model: SiteModel = { pages: site.pages, brand: params.brand || site.brand, data: site.data };
   const tag = fellBackFrom ? `assigned ${fellBackFrom} (not operational yet) → built on ${builtOn}` : `built on ${builtOn}`;
 
+  // agency-grade: give every DB-backed card a real photo (once, cached) BEFORE the site is served —
+  // so product/collection grids are visual, not text-on-white. Best-effort; never blocks the build.
+  try {
+    const { contentTables } = await import('../appdb.ts');
+    const { enrichRowImages } = await import('../rowmedia.ts');
+    const cts = await contentTables(pool, projectId);
+    if (cts.length) { const e = await enrichRowImages(pool, projectId, cts); if (e.fetched) await ev(pool, projectId, null, 'row_images', `fetched ${e.fetched} product/content photo(s)`); }
+  } catch (e: any) { await ev(pool, projectId, null, 'row_images_failed', String(e?.message ?? e).slice(0, 160)).catch(() => {}); }
+
   try {
     const inst = await entry.adapter.provision(ctx);
     const h = await entry.adapter.healthcheck(inst);
