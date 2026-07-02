@@ -116,7 +116,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, tables, forms, primaryTable, brand, site };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, brand, site } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -172,7 +172,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       // or REJECT the unfixable into retry-with-feedback. No page renders until this passes the site_model gate.
       if (task.department === 'compose') {
         const raw = extractFirstJson(content);
-        const { site, repairs, errors } = normalizeSite(raw, ctx.pages || [], { tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+        const { site, repairs, errors } = normalizeSite(raw, ctx.pages || [], { tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, archetype: (ctx as any).archetype });
         if (errors.length) throw new Error('site compose rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[compose] ${task.project_id}: ${repairs.join(' · ')}`);
         await pool.query("update projects set params = jsonb_set(params, '{site}', $2::jsonb, true) where id=$1", [task.project_id, JSON.stringify(site)]);

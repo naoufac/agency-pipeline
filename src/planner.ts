@@ -63,6 +63,13 @@ function validate(plan: any, brief: string): Plan | null {
   const shape = shapeFor(plan?.shape, brief);             // same: landing detected in CODE, never LLM whim
   // LANDING (PLAN.md M1): exactly ONE page — the conversion page. Forced here, gated in site_model.
   if (shape === 'landing') pages = [pages[0]];
+  // STORE (PQ2): a store must be able to SELL — guarantee cart + checkout pages exist (shop lives on
+  // index or a shop page; the products grid is guaranteed at compose time).
+  if (archetype === 'store' && shape !== 'landing') {
+    if (!pages.some(p => /cart|basket|bag/.test(p.slug))) pages.push({ slug: 'cart', title: 'Cart' });
+    if (!pages.some(p => /checkout/.test(p.slug))) pages.push({ slug: 'checkout', title: 'Checkout' });
+    pages = pages.slice(0, 6);
+  }
 
   // thinking tasks only (drop any build/qa the LLM emitted)
   let tasks: Task[] = list.map((t: any, i: number) => ({

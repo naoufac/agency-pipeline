@@ -128,7 +128,7 @@ function clampSeedPks(model: any, repairs: string[] = []): any {
 }
 
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
-const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form', 'logos', 'offer']);
+const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form', 'logos', 'offer', 'products', 'cart', 'checkout']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;
 
 const str = (v: any): string => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
@@ -227,6 +227,15 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
       // a form always works: contact bucket by default, or a typed table IF it really exists.
       if (nonEmpty(s.table) && ctx.forms && !ctx.forms[str(s.table)]) { repairs.push(`form table "${str(s.table)}" not real -> contact bucket`); delete s.table; }
       break;
+    case 'products': {
+      // the shop grid must point at the real products table (or the primary catalog table)
+      const tabs = ctx.tables || [];
+      if (!nonEmpty(s.table) || !tabs.includes(str(s.table))) s.table = tabs.includes('products') ? 'products' : (ctx.primaryTable || 'products');
+      break;
+    }
+    case 'cart':
+    case 'checkout':
+      break;  // fully deterministic components — copy fields only
     case 'feed':
       break;  // reads public submissions; renderer defaults the form name to "listing"
   }
@@ -330,7 +339,7 @@ export function siteCopySlop(pages: { sections: any[] }[]): string | null {
 // the per-page spec contract (hero-first, >=2 real sections, catalog injection). Pages render deterministically
 // from this. Returns the normalized pages, or REJECTS the unfixable into retry-with-feedback.
 export type SiteResult = { site: { pages: { slug: string; title: string; sections: any[] }[] }; repairs: string[]; errors: string[] };
-export function normalizeSite(raw: any, pages: { slug: string; title: string }[], base: { tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string } = {}): SiteResult {
+export function normalizeSite(raw: any, pages: { slug: string; title: string }[], base: { tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; archetype?: string } = {}): SiteResult {
   const repairs: string[] = []; const errors: string[] = [];
   const out: { slug: string; title: string; sections: any[] }[] = [];
   const rawPages: any[] = (raw && Array.isArray(raw.pages)) ? raw.pages : [];
@@ -361,6 +370,21 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
       target.sections.push({ type: 'form', title: humanTitle(pt), intro: '', table: pt, form: pt });
       repairs.push(`injected the missing typed form on "${target.slug}" (table "${pt}") — an app's core action must be a real form`);
     }
+  }
+  // GUARANTEE THE STORE (PQ2): a store model must actually SELL — a products grid somewhere, a cart
+  // section on the cart page, a checkout section on the checkout page. Injected deterministically
+  // when the model forgot them (never trust, always force); the site_model gate then asserts it.
+  if ((base as any).archetype === 'store' && out.length) {
+    const hasProducts = out.some(p => p.sections.some((x: any) => x.type === 'products'));
+    if (!hasProducts) {
+      const shop = out.find(p => /shop|store|product|catalog|menu/.test(p.slug)) || out[0];
+      shop.sections.splice(Math.min(1, shop.sections.length), 0, { type: 'products', title: 'Shop', intro: '', table: (base.tables || []).includes('products') ? 'products' : (base.primaryTable || 'products') });
+      repairs.push(`injected the products grid on "${shop.slug}"`);
+    }
+    const cartPage = out.find(p => /cart|basket|bag/.test(p.slug));
+    if (cartPage && !cartPage.sections.some((x: any) => x.type === 'cart')) { cartPage.sections.push({ type: 'cart', title: 'Your cart' }); repairs.push('injected the cart on "' + cartPage.slug + '"'); }
+    const coPage = out.find(p => /checkout|order/.test(p.slug));
+    if (coPage && !coPage.sections.some((x: any) => x.type === 'checkout')) { coPage.sections.push({ type: 'checkout', title: 'Checkout', intro: '' }); repairs.push('injected the checkout on "' + coPage.slug + '"'); }
   }
   // COPY GATE at the RETRYABLE stage: reject slop/placeholders now (compose retries with feedback) instead of
   // letting it reach the deterministic render, where a retry can't fix it. {{brand}} is ignored (not slop).

@@ -189,6 +189,18 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
       const hasForm = ps.some((p: any) => (p.sections || []).some((s: any) => s.type === 'form' && typeof s.table === 'string' && s.table));
       if (!hasForm) return { ok: false, log: 'an app/store site must include at least one {"type":"form","table":...} section — the core action (booking/ordering/signing up) has to be a REAL working form' };
     }
+    // STORE gate (PQ2): a store must actually SELL — products grid somewhere, a cart on the cart
+    // page, a checkout on the checkout page (normalizeSite injects them; this asserts nothing slipped).
+    if (String(r.rows[0]?.archetype) === 'store') {
+      if (!ps.some((p: any) => (p.sections || []).some((x: any) => x.type === 'products')))
+        return { ok: false, log: 'a store must include a {"type":"products"} shop grid section' };
+      const cartP = ps.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
+      if (cartP && !(cartP.sections || []).some((x: any) => x.type === 'cart'))
+        return { ok: false, log: `the "${cartP.slug}" page must carry a {"type":"cart"} section` };
+      const coP = ps.find((p: any) => /checkout/.test(String(p.slug)));
+      if (coP && !(coP.sections || []).some((x: any) => x.type === 'checkout'))
+        return { ok: false, log: `the "${coP.slug}" page must carry a {"type":"checkout"} section` };
+    }
     // LANDING gate (PLAN.md M1): exactly one page, >=2 conversion sections, final section is the CTA.
     if (r.rows[0]?.shape === 'landing') {
       if (ps.length !== 1) return { ok: false, log: `a landing project is EXACTLY 1 page — model has ${ps.length}` };

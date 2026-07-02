@@ -158,6 +158,70 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
   return { applied, skipped };
 }
 
+// PQ2 — PLACE ORDER: the checkout write. Deterministic store contract: tables literally named
+// products / orders / order_items (enforced by the app_db gate for store briefs). ZERO TRUST in the
+// client: prices come from the products table, the total is computed HERE, unit prices are
+// snapshotted onto the line items, and the whole write is one transaction.
+export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any }[]): Promise<{ ok: boolean; order?: number; total?: number; error?: string }> {
+  const schema = schemaName(projectId);
+  const tables = await listTables(pool, projectId);
+  for (const t of ['products', 'orders', 'order_items']) if (!tables.includes(t)) return { ok: false, error: 'this site has no store (missing ' + t + ')' };
+  // validate items: 1..30 lines, integer ids, qty 1..99, no duplicates
+  if (!Array.isArray(items) || !items.length || items.length > 30) return { ok: false, error: 'cart is empty or too large' };
+  const seen = new Set<number>();
+  const lines: { id: number; qty: number }[] = [];
+  for (const it of items) {
+    const id = Number(it?.id), qty = Number(it?.qty);
+    if (!Number.isInteger(id) || id < 1 || !Number.isInteger(qty) || qty < 1 || qty > 99 || seen.has(id)) return { ok: false, error: 'invalid cart line' };
+    seen.add(id); lines.push({ id, qty });
+  }
+  const name = String(buyer?.customer_name ?? buyer?.name ?? '').trim();
+  const email = String(buyer?.email ?? '').trim();
+  if (!name || name.length > 120) return { ok: false, error: 'your name is required' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { ok: false, error: 'a real email is required' };
+  // server-side pricing — the client\'s numbers are never used
+  const priceCols = (await typedColumns(pool, schema, 'products')).filter(c => /numeric|int|real|double|decimal/.test(c.type) && /^(price|amount|cost)$/.test(c.name));
+  if (!priceCols.length) return { ok: false, error: 'products table has no price column' };
+  const pcol = priceCols[0].name;
+  const prod = await pool.query(`select id, "${pcol}"::numeric as price from "${schema}"."products" where id = any($1)`, [lines.map(l => l.id)]);
+  const priceById = new Map<number, number>(prod.rows.map((r: any) => [Number(r.id), Number(r.price)]));
+  for (const l of lines) if (!priceById.has(l.id)) return { ok: false, error: 'a product in your cart no longer exists' };
+  const total = Math.round(lines.reduce((s2, l) => s2 + priceById.get(l.id)! * l.qty, 0) * 100) / 100;
+  // column-flexible write (the model may name columns slightly differently), one transaction
+  const oCols = new Set((await typedColumns(pool, schema, 'orders')).map(c => c.name));
+  const iCols = new Set((await typedColumns(pool, schema, 'order_items')).map(c => c.name));
+  const nameCol = ['customer_name', 'name', 'buyer_name'].find(c => oCols.has(c));
+  const qtyCol = ['qty', 'quantity'].find(c => iCols.has(c));
+  const unitCol = ['unit_price', 'price'].find(c => iCols.has(c));
+  const prodCol = ['product_id'].find(c => iCols.has(c));
+  const orderCol = ['order_id'].find(c => iCols.has(c));
+  if (!nameCol || !qtyCol || !prodCol || !orderCol) return { ok: false, error: 'store schema is missing standard order columns' };
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query("set local statement_timeout = '10s'");
+    const cols: string[] = [nameCol]; const vals: any[] = [name];
+    if (oCols.has('email')) { cols.push('email'); vals.push(email); }
+    if (oCols.has('phone') && buyer?.phone) { cols.push('phone'); vals.push(String(buyer.phone).slice(0, 40)); }
+    if (oCols.has('notes') && buyer?.notes) { cols.push('notes'); vals.push(String(buyer.notes).slice(0, 500)); }
+    if (oCols.has('status')) { cols.push('status'); vals.push('new'); }
+    if (oCols.has('total')) { cols.push('total'); vals.push(total); }
+    const o = await c.query(`insert into "${schema}"."orders" (${cols.map(x => `"${x}"`).join(',')}) values (${cols.map((_, i) => '$' + (i + 1)).join(',')}) returning id`, vals);
+    const orderId = Number(o.rows[0].id);
+    for (const l of lines) {
+      const ic: string[] = [orderCol, prodCol, qtyCol]; const iv: any[] = [orderId, l.id, l.qty];
+      if (unitCol) { ic.push(unitCol); iv.push(priceById.get(l.id)); }
+      await c.query(`insert into "${schema}"."order_items" (${ic.map(x => `"${x}"`).join(',')}) values (${ic.map((_, i) => '$' + (i + 1)).join(',')})`, iv);
+    }
+    await c.query('commit');
+    return { ok: true, order: orderId, total };
+  } catch (e: any) {
+    try { await c.query('rollback'); } catch {}
+    console.error('placeOrder', projectId, e?.message ?? e);
+    return { ok: false, error: 'could not place the order — please try again' };
+  } finally { c.release(); }
+}
+
 export async function listTables(pool: pg.Pool, projectId: string): Promise<string[]> {
   const schema = schemaName(projectId);
   const r = await pool.query(

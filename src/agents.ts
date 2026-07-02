@@ -25,7 +25,7 @@ const WEB_DEPTS = new Set(['research', 'strategy']);
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; layout?: any; shape?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any }; site?: any };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; layout?: any; shape?: string; archetype?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any }; site?: any };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -34,6 +34,7 @@ const ROLE: Record<string, string> = {
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
   database:    'You are the Database department. DESIGN the app\'s data model and output ONLY a JSON object (no prose, no SQL, no fences): {"entities":[{"name":"products","public":true,"display":"name","fields":[{"name":"title","type":"text","required":true},{"name":"price","type":"money","required":true},{"name":"category","type":"ref:categories"},{"name":"in_stock","type":"bool","default":true},{"name":"description","type":"longtext"}],"seed":[{"title":"...","price":12.5,"category":1,"in_stock":true,"description":"..."}]}]}. ' +
                'Field types: text, longtext, int, money, bool, date, datetime, email, url, slug, image, json. Relations: "type":"ref:<entity>". Rules: model the REAL entities for this brief (3-6 tables, proper relations); mark the main public-facing entity "public":true with "display" set to its title field and SEED it with 4-8 realistic rows; ALSO seed 3+ realistic rows into EVERY table referenced by a required "ref:" field (an empty referenced table makes the booking/order form impossible to submit — its dropdown would have no options); required/unique where it matters. The system COMPILES this into a correct, indexed Postgres schema (serial PKs, FK constraints + indexes, created_at) — you only describe the model. JSON only.' +
+               ' STORE CONTRACT (when the brief is a shop/e-commerce): you MUST include EXACTLY these three entities so the built-in cart/checkout can write real orders — "products" (public:true, display:"title" or "name", a "price" money field, seeded 4-8 rows), "orders" (customer_name text required, email text, phone text, notes longtext, status text, total money), "order_items" (order ref:orders required, product ref:products required, qty int required, unit_price money). Name them exactly products / orders / order_items.' +
                ' STRICT OUTPUT (a malformed model fails the build): emit EXACTLY ONE JSON object — self-check that every { has a matching } and there is NO second block, no fences, no prose before/after, no trailing commas. The "entities" key MUST be present and a NON-EMPTY array. Every integer value (seed PKs, counts, amounts) MUST fit PostgreSQL INT4 (max 2,147,483,647): use small seed PKs (1-100) and, for a genuinely huge real-world number (a bounty, a population, a market cap), scale it down or put it in a "text" field — NEVER emit an integer over 2.1 billion.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
   media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
@@ -76,6 +77,7 @@ const ROLE: Record<string, string> = {
                '- {"type":"offer","eyebrow":"kicker","title":"the offer in one line","body":"one sentence","bullets":["what they get","..."],"price":"$499","period":"one-time","cta":"label","guarantee":"a concrete risk-reversal, e.g. 30-day money-back"}  (the conversion core — price only if the brief names one)\n' +
                '- {"type":"form","title":"...","intro":"one line","cta":"Send","form":"contact"}  (a REAL stored form; put one on a contact / sign-up / get-in-touch page)\n' +
                '- {"type":"collection","title":"...","table":"items"} and {"type":"feed","form":"listing"}  (LIVE lists of real DB rows / public submissions — for app/store/directory pages; use the EXACT table names provided, pair a feed with a matching form)\n' +
+               '- STORE ONLY: {"type":"products","title":"...","intro":"one line","table":"products"} (the SHOP GRID with Add-to-cart — put it on the shop/index page) · {"type":"cart","title":"Your cart"} (ONLY on the cart page) · {"type":"checkout","title":"Checkout","intro":"one line","cta":"Place order"} (ONLY on the checkout page)\n' +
                'JSON ONLY — exactly one object containing every page. Self-check: every { has a matching }, no second block, no prose/fences.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
@@ -103,6 +105,11 @@ function buildUser(ctx: Ctx, department?: string): string {
     }
     if (ctx.brand && ctx.brand.name) {
       s += `\nBUSINESS NAME — SYSTEM-OWNED: do NOT write the business name anywhere. Wherever the name would appear in copy, write the literal token {{brand}} — the system inserts the one locked name (the renderer also owns the logo, palette + nav button). You ONLY write copy + sections. Never invent or write a business name.\n`;
+    }
+    // STORE (PQ2): the shop grid + cart + checkout are deterministic components — the composer only
+    // places them and writes the copy around them.
+    if ((ctx as any).archetype === 'store') {
+      s += `\nTHIS IS A STORE: the shop/index page MUST include {"type":"products","table":"products"}; the cart page gets {"type":"cart"}; the checkout page gets {"type":"checkout"}. Do NOT put a generic form on the checkout page — the checkout component already collects the buyer's details and writes a REAL order.\n`;
     }
     // LANDING (PLAN.md M1): one page engineered to convert — strict order, proof + offer, CTA last.
     if (ctx.shape === 'landing') {

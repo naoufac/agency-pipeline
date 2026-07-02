@@ -104,6 +104,43 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
       catch { issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" failed to load`, severity: 'high' }); }
     }
+    // STORE PROBE (PQ2): a real browser BUYS — add 2 products to the cart, check out, and prove the
+    // order + line items landed in the database. Runs only on store builds (checkout page present).
+    const params2 = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
+    const coPage = pages.find((p: any) => /checkout/.test(String(p.slug)));
+    if (params2.archetype === 'store' && coPage) {
+      const shopPage = pages.find((p: any) => /shop|store|product|catalog/.test(String(p.slug))) || pages[0];
+      const sch2 = appdb.schemaName(projectId);
+      const oCount = async () => { try { return Number((await pool.query(`select count(*)::int n from "${sch2}"."orders"`)).rows[0].n); } catch { return -1; } };
+      try {
+        await goto(page, url(shopPage.slug));
+        await page.waitForFunction(`document.querySelectorAll('.p-add').length > 0`, { timeout: 8000 }).catch(() => {});
+        const addBtns = await page.evaluate(`document.querySelectorAll('.p-add').length`).catch(() => 0);
+        if (!addBtns) {
+          issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'the shop grid shows no purchasable products (no Add-to-cart buttons rendered)', severity: 'high' });
+        } else {
+          await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add');b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`);
+          await page.waitForTimeout(400);
+          const before2 = await oCount();
+          await goto(page, url(coPage.slug));
+          const done2: any = await page.evaluate(`new Promise(function(res){var f=document.querySelector('form.rcheckout');if(!f)return res({no_form:true});f.querySelector('[name=customer_name]').value='QA Buyer';f.querySelector('[name=email]').value='qa-buyer@relay.test';var ph=f.querySelector('[name=phone]');if(ph)ph.value='000';f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));setTimeout(function(){var m=f.querySelector('.rform-msg');res({msg:m?String(m.textContent):''})},4000)})`).catch(() => null);
+          let after2 = await oCount();
+          for (let k = 0; k < 6 && after2 <= before2; k++) { await page.waitForTimeout(500); after2 = await oCount(); }
+          if (done2?.no_form) issues.push({ page: coPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'the checkout page has no checkout form', severity: 'high' });
+          else if (before2 < 0 || after2 <= before2) issues.push({ page: coPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'checkout submitted but NO order row landed in the database — the store cannot sell', severity: 'high' });
+          else {
+            const li = Number((await pool.query(`select count(*)::int n from "${sch2}"."order_items" oi join "${sch2}"."orders" o on o.id=oi.order_id where o.email='qa-buyer@relay.test'`)).rows[0].n);
+            if (li < 1) issues.push({ page: coPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'an order row landed but with no line items', severity: 'high' });
+            // clean up the probe purchase
+            await pool.query(`delete from "${sch2}"."order_items" where order_id in (select id from "${sch2}"."orders" where email='qa-buyer@relay.test')`).catch(() => {});
+            await pool.query(`delete from "${sch2}"."orders" where email='qa-buyer@relay.test'`).catch(() => {});
+          }
+        }
+      } catch (e: any) {
+        issues.push({ page: coPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'buy-flow probe failed: ' + String(e?.message ?? e).slice(0, 120), severity: 'high' });
+      }
+    }
+
     // forms: scan every page, PREFER the typed form (data-table), submit it, prove it landed
     // (real table or submissions bucket), then clean up.
     await page.setViewportSize({ width: 1280, height: 900 });

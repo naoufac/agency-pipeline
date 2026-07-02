@@ -117,6 +117,23 @@ p{margin:0 0 1rem}
 }
 /* section rhythm — alternating surface bands (only when l-band) for real vertical variety */
 .l-band main>.section:nth-of-type(even){background:var(--surface)}
+/* ============================================================================
+   STORE PRIMITIVES (PQ2) — product grid with add-to-cart, cart, checkout. All data rendered via
+   textContent (never innerHTML of server data); prices shown client-side are display-only — the
+   ORDER total is computed server-side from the database, never trusted from the client.
+   ============================================================================ */
+.p-price{font-family:var(--font-display);font-weight:700;font-size:1.15rem;margin:.3rem 0 .8rem}
+.p-add{width:100%;justify-content:center}
+.cart-box{background:var(--surface);border:var(--border-w,1px) solid var(--line);border-radius:var(--radius);padding:22px}
+.cart-line{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.cart-line:last-of-type{border-bottom:0}
+.cart-line .cl-title{flex:1;font-weight:600}
+.cart-qty{display:inline-flex;align-items:center;gap:8px}
+.cart-qty button{font:inherit;width:28px;height:28px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;cursor:pointer;line-height:1}
+.cart-remove{background:none;border:0;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:4px}
+.cart-total{display:flex;justify-content:space-between;font-weight:700;font-size:1.15rem;padding-top:14px}
+.cart-empty{color:var(--muted);padding:8px 0}
+.cart-actions{margin-top:18px}
 `;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {
@@ -172,6 +189,34 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     return `<header class="hero on-image">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
       <div class="container"><div class="hero-inner">${copy}</div></div></header>`;
   },
+  // STORE (PQ2) · products — a real shop grid: cards load from the live products table and each
+  // carries an Add-to-cart button (client cart; the order itself is priced server-side).
+  products: (s, o) => {
+    const t = esc((s.table && o?.forms && o.forms[s.table]) ? s.table : (o?.primaryTable || s.table || 'products'));
+    return `<section class="section" id="shop"><div class="container">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="grid grid-3 products" data-products="${t}" style="margin-top:2.4rem"><p class="muted feed-empty">${esc(s.empty || 'Loading the collection…')}</p></div>
+  </div></section>`;
+  },
+  // STORE · cart — line items, quantity controls, total; rendered entirely by the client runtime.
+  cart: (s) => `<section class="section" id="cart"><div class="container" style="max-width:760px">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="cart-box" data-cart="full"><p class="cart-empty">Your cart is empty.</p></div>
+  </div></section>`,
+  // STORE · checkout — buyer details + order summary; submit posts the cart to /api/site/:id/order,
+  // which recomputes the total from the database and writes order + order_items in one transaction.
+  checkout: (s) => `<section class="section" id="checkout"><div class="container" style="max-width:640px">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="cart-box" data-cart="summary" style="margin:1.4rem 0"><p class="cart-empty">Your cart is empty.</p></div>
+    <form class="rcheckout rform" onsubmit="return relayCheckout(event)">
+      <label>Full name<input name="customer_name" type="text" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Phone<input name="phone" type="text"></label>
+      <label>Notes<textarea name="notes"></textarea></label>
+      <button class="btn" type="submit">${esc(s.cta || 'Place order')}</button>
+      <p class="rform-msg" hidden></p>
+    </form>
+  </div></section>`,
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>

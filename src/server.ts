@@ -243,6 +243,24 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       catch (e: any) { console.error('site data insert', dataM[1], dataM[2], e?.message ?? e); return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'could not save — please check the form and try again' })); }
     }
+    // ---- PQ2 · CHECKOUT: cart -> one transactional order (server-priced, never client prices) ----
+    const orderM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/order$/i);
+    if (orderM && !UUID_RE.test(orderM[1])) return send(res, 404, 'application/json', '{"ok":false,"error":"unknown site"}');
+    if (orderM && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (formLimited(ip)) return send(res, 429, 'application/json', '{"ok":false,"error":"too many orders — try again shortly"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+      const proj = (await pool.query('select brief from projects where id=$1', [orderM[1]])).rows[0];
+      if (!proj) return send(res, 404, 'application/json', '{"ok":false,"error":"unknown site"}');
+      const r = await appdb.placeOrder(pool, orderM[1], b.buyer || {}, Array.isArray(b.items) ? b.items : []);
+      if (r.ok) {
+        await pool.query("insert into run_events(project_id, type, detail) values ($1,'order_placed',$2)", [orderM[1], `order #${r.order} · total $${r.total}`]).catch(() => {});
+        notifyLead(pool, orderM[1], proj.brief, 'order', { order: `#${r.order}`, total: `$${r.total}`, name: b.buyer?.customer_name || b.buyer?.name || '', email: b.buyer?.email || '' });
+      }
+      return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r));
+    }
+
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
       const own = await ownerOf(id);
