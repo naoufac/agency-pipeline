@@ -128,6 +128,8 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
             let refRows = 0;
             try { refRows = Number((await pool.query(`select count(*)::int n from "${sch}"."${f.ref}"`)).rows[0].n); } catch {}
             if (refRows > 0 && f.options <= 1) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'empty-ref-dropdown', detail: `the "${f.name}" dropdown should list ${refRows} real record(s) from "${f.ref}" but shows none — relation options aren't loading`, severity: 'high' });
+            // a REQUIRED relation with an empty referenced table = an unsubmittable form (no option to pick)
+            else if (refRows === 0 && f.required) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'empty-ref-dropdown', detail: `the required "${f.name}" dropdown has nothing to offer — referenced table "${f.ref}" is EMPTY. The data model must seed tables referenced by required relations.`, severity: 'high' });
           }
         } catch {}
       }
