@@ -86,7 +86,7 @@ A free-text **brief** ("build a WordPress website for Nike," "build a delivery a
 | **Scheduler / runner loop** | Reclaim stale leases → reconcile readiness → enforce budget + concurrency caps → claim ready tasks (`SKIP LOCKED`) → dispatch agents → validate + persist results. Holds **no business logic and no truth**. | **None** (disposable) |
 | **Agents registry** | `agents` table: per-department role prompt, concurrency cap, model + cost policy — **no output schema; agents are plain API calls**. Scheduler resolves `assignee_agent` from `department`. | In DB |
 | **Department agents** | Specialized subagents differing by role prompt only — a **plain API call** (text in → text out). The runner writes the artifact and verifies it. | None; idempotent |
-| **Context store** | `task_outputs.content` (plain text / artifact) + Supabase Storage (binaries) + `projects.brand_kit` (pinned global brand). | In DB / Storage |
+| **Context store** | `task_outputs.content` (plain text / artifact) + object storage (R2/S3) (binaries) + `projects.brand_kit` (pinned global brand). | In DB / Storage |
 | **Governance** | `budget_ledger` (cost ceiling), `side_effects` (idempotency for real-world actions), `run_events` (audit). **No `approvals`/human gates — completion is automated.** | In DB |
 
 **The hard rule:** agents never talk to each other directly. The **board is the message bus**. Work physically moves desk-to-desk (like an agency), and because nothing important lives in the runner, the system is restart-safe by construction.
@@ -261,7 +261,7 @@ create table task_outputs (
   kind          text not null,                        -- 'brand_system'|'db_schema'|'screen_set'...
   content       text not null,                       -- raw agent output / artifact text (trusted only after verify)
   summary       text,                                 -- short digest for context packing
-  artifact_urls jsonb not null default '[]'::jsonb,   -- Supabase Storage refs (logos, SQL, mocks)
+  artifact_urls jsonb not null default '[]'::jsonb,   -- object storage (R2/S3) refs (logos, SQL, mocks)
   created_at    timestamptz not null default now()
 );
 
@@ -1094,6 +1094,6 @@ These resolve every open item with a decided default. **The system runs a brief 
 
 **D6 · Re-planning = autonomous.** An agent may emit `proposed_tasks`; the planner re-validates and inserts them, running the cycle check on every structural mutation. No human review of the new graph.
 
-**D7 · Workspace & storage.** Per-project **git repo** as the artifact workspace; **Supabase Storage** for binaries. `task_outputs.content` holds the artifact text *or* a path/URL to it. Everything else (graph, status, events) stays in Postgres — still the single source of truth, still restart-safe.
+**D7 · Workspace & storage.** Per-project **git repo** as the artifact workspace; **object storage (R2/S3)** for binaries. `task_outputs.content` holds the artifact text *or* a path/URL to it. Everything else (graph, status, events) stays in Postgres — still the single source of truth, still restart-safe.
 
 **D8 · Operator touchpoints (outside the loop).** Exactly two: the **brief in**, and an **end-of-run notification** with the result and a link to the workspace/board. The operator is never a dependency of the running graph.
