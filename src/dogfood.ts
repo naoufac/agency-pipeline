@@ -41,6 +41,11 @@ const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform[data-
 export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; links: number; linkTargets: number; forms: number; collections: number } }> {
   const proj = await pool.query('select params from projects where id=$1', [projectId]);
   const pages = (proj.rows[0]?.params?.pages) || [{ slug: 'index', title: 'Home' }];
+  // pages that carry the site's ACTION (form/products/checkout/offer) — a page every button drives to
+  // is legitimate store/app design when it's one of these, even when that page is home.
+  const actionSlugs = new Set<string>((((proj.rows[0]?.params?.site || {}).pages) || [])
+    .filter((p: any) => (p.sections || []).some((s: any) => s && ['form', 'products', 'checkout', 'offer'].includes(String(s.type))))
+    .map((p: any) => String(p.slug)));
   const issues: Issue[] = []; let nButtons = 0, nForms = 0, nColls = 0, nLinks = 0;
   const targets = new Set<string>();
   const siteLogos = new Set<string>();   // every page's logo text — a coherent site shows exactly ONE
@@ -88,7 +93,10 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         // surfaced as a medium style note, never a blocker, never a wasted recompose.
         if (vp.name === 'desktop' && btnTargets.length >= 3 && new Set(btnTargets).size === 1) {
           const target = btnTargets[0];
-          if (target === 'index.html') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `all ${btnTargets.length} buttons on this page collapse to home (${target}) — CTAs aren't routing`, severity: 'high' });
+          // FS0 calibration: when home genuinely HOSTS the core action (the booking form on index),
+          // "everything drives to home" is the ordinary shared-action-page pattern, not the broken
+          // resolver. Home-collapse stays a blocker only when home has no action to offer.
+          if (target === 'index.html' && !actionSlugs.has('index')) issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `all ${btnTargets.length} buttons on this page collapse to home (${target}) — CTAs aren't routing`, severity: 'high' });
           else issues.push({ page: pg.slug, viewport: vp.name, kind: 'cta-monotone', detail: `all ${btnTargets.length} buttons on this page share one destination (${target}) — consider varying secondary CTAs`, severity: 'medium' });
         }
         if (vp.name === 'desktop') {

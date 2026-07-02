@@ -56,6 +56,21 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
   ok('core action form still injected for apps', rs.site.pages[0].sections.some((s: any) => s.type === 'form' && s.table === 'bookings'), JSON.stringify(rs.repairs));
 }
 
+// ---- CTA -> the form itself (the "everything collapses to home" class) ----
+{
+  const { renderPage, formPageSlug } = await import('./render.ts');
+  const site = { pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Fresh fades' }, { type: 'form', table: 'bookings' }] },
+    { slug: 'barbers', title: 'Barbers', sections: [{ type: 'hero', headline: 'The team' }] }] };
+  ok('formPageSlug finds the page carrying the form', formPageSlug(site) === 'index');
+  const barbers = renderPage(
+    { brand: { name: 'Chop', tokens: {}, cta: 'Book now' }, sections: [
+      { type: 'hero', headline: 'Meet the barbers', cta: 'Book now' },
+      { type: 'cta', headline: 'Ready for a fresh cut?', cta: 'Book your slot' }] },
+    { pages: site.pages.map(p => ({ slug: p.slug, title: p.title })), slug: 'barbers', title: 'Barbers', formSlug: 'index' });
+  ok('cross-page CTAs land AT the form (anchor), never a bare home reload', barbers.includes('href="index.html#contact-form"') && !/class="btn" href="index\.html"/.test(barbers), (barbers.match(/class="btn" href="[^"]*"/g) || []).join(' '));
+}
+
 // ---- PRIVACY layer (real scratch schema) ----
 const pool = makePool();
 const id = randomUUID();

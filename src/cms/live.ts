@@ -3,7 +3,7 @@
 // the CMS and the live page changes on the next load, with NO rebuild. Returns null for non-CMS
 // projects (the caller then serves the static file as before).
 import pg from 'pg';
-import { renderPage } from '../render.ts';
+import { renderPage, formPageSlug } from '../render.ts';
 import { processMedia } from '../media.ts';
 import { brandFor } from './util.ts';
 import { SITES } from '../verify.ts';
@@ -31,7 +31,7 @@ export async function renderLiveFromCms(pool: pg.Pool, projectId: string, slug: 
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: row.sections };
   // M2: pass the schema snapshot — without it a typed form silently degrades to the contact fallback
   const sf = params.schema_forms || {};
-  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable });
+  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable, formSlug: formPageSlug(params.site) });
   try { html = await processMedia(html, new URL(projectId + '/', SITES)); } catch { /* image-light or no key */ }
   return `<!--relay:cms=directus LIVE doc=${row.id} (rendered from CMS on request)-->\n` + html;
 }
@@ -58,6 +58,6 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const cartPage = navPages.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
   const title = String(row.title || row.name || 'Product #' + productId);
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: cartPage?.slug }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout });
+  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site) });
   return `<!--relay:cms=directus LIVE pdp=${productId} (rendered from the live product row on request)-->\n` + html;
 }

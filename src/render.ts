@@ -12,7 +12,12 @@ const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16
 function mix(a: string, b: string, t: number) { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => hex(x[i] * (1 - t) + y[i] * t)).join(''); }
 const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg) ? '#ffffff' : '#0b1220';   // readable text for a bg
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string }): string {
+// the slug of the page carrying the site's form — CTAs that resolve there land AT the form (anchor),
+// so "Book now" from any page arrives at the actual booking form, never at the top of a page.
+export const formPageSlug = (site: any): string | undefined =>
+  ((site && site.pages) || []).find((p: any) => (p.sections || []).some((s: any) => s && s.type === 'form'))?.slug;
+
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string }): string {
   // LAYOUT (structure) is chosen once per project (params.layout) and passed here; a stray value falls
   // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
   const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
@@ -67,6 +72,9 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
       if (other) target = other.slug;
       else return onPageAnchor;   // single-page site: jump to the real conversion section, never a reload
     }
+    // FS0: the page carrying the site's form is a CONVERSION destination — land the visitor AT the
+    // form. This also makes "every button routes to home" honest when home genuinely hosts the form.
+    if (ctx.formSlug && target === ctx.formSlug && target !== ctx.slug) return target + '.html#contact-form';
     return target + '.html';
   };
   // single-page (landing) sites have no other page to link to — a CTA must anchor to the real
