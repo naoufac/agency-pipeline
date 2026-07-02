@@ -81,6 +81,14 @@ accounts cannot build; an automated test-mode purchase runs end-to-end on every 
 4. **Done = the phone check passes AND the machine gate is green.** Never a report, never a promise.
 5. **No milestone starts before the previous gate is green.** No parallel half-built systems.
 
+## Owner note (2026-07-02) — pulled forward / queued
+- **Lead email alerts shipped early** (was M5's core): every produced-site submission is emailed to
+  the operator; SMTP + SPF/DKIM/DMARC live; status published at mail.naples.agency. M5 keeps the
+  stuck-build Telegram alert; M4 adds account email on the same rails.
+- **Queued after M6 — mission-rooted differentiation** (owner's agency principle: every choice
+  follows the client's mission, like a Shopify build where theme/apps/categories serve the store's
+  purpose): deeper visual variety, mission-driven capability choices, richer brand systems.
+
 ## What is explicitly NOT in this plan (deferred until a milestone needs it)
 Multi-operator teams · analytics dashboards · custom client domains · object storage / scale-out
 (steps recorded in `docs/STACK-REVIEW.md`) · any new CMS, framework, or service.

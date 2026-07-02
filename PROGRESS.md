@@ -229,3 +229,17 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
   - **1 rejected spec** caught (coffeery home page)
   - 0 errors
 - **R1–R7 fixes confirmed working in LIVE mode.** the 0 agent_errors post-R3 wasn't theater — R3/R7 are doing real work.
+
+## 2026-07-02 — Milestones M1–M3 shipped + consolidation (Fable 5 session)
+One pipeline, ONE CMS locked (GOAL.md relocked; WordPress/Drupal/selector deleted; `cms:check`
+guards it). M1 landing pages (landing shape in code, logos/offer components, site_model landing
+gate). M2 schema-compiled forms (relation dropdowns from real FK records, schema-match + submit
+gates in dogfood; schema snapshot at compose; CMS re-serve paths carry it). M3 in-place rebuild
+(additive-only migrations + row-count rollback guard, `migrate:check` 17 assertions; stale
+generations swept from disk + CMS; brand/theme survive). Self-repair loop revived (compose-based,
+site-wide findings included). Lead email live (mail.ts; every submission emailed to the operator;
+status page at mail/email.naples.agency). Owner-first project metrics replace engineering vanity.
+Board docs/roadmap/about brought to reality (compose/CMS/QA stages, full gate list). Deploy script
+gained a typecheck gate after a broken string crash-looped prod once. Checks: spec 120 · migrate 17
+· cms 9 · themes 5/5. Recon: supabase CLI/dead pointers removed, relay-drupal decommissioned,
+Supabase account token kept as the documented scale-out path.

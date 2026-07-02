@@ -246,14 +246,9 @@ function project(id, tab, seq){
 
   async function metricsTab(){
     const k = await j('/api/kpi?id=' + id);
-    const extra = [];
-    if (prow.total) extra.push({label:'First-pass', value:Math.round(100*prow.firstpass/(prow.done||1))+'%', sub:`${prow.firstpass}/${prow.done}`, tone:'neutral'});
-    if (prow.total) extra.push({label:'Verification rigor', value:Math.round(100*prow.realchecks/prow.total)+'%', sub:`${prow.realchecks}/${prow.total} real checks`, tone:'neutral'});
-    if (prow.wall) extra.push({label:'Wall-clock', value:prow.wall+'s', sub:'end to end', tone:'neutral'});
-    const all = (k?.kpis||[]).concat(extra);
     document.getElementById('pbody').innerHTML = `
-      <p class="muted" style="margin-bottom:18px">How this build performed. Relay verifies every step — it never takes the agent’s word.</p>
-      <div class="kpis">${all.map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
+      <p class="muted" style="margin-bottom:18px">What actually matters about this build — every number checked against the database, never the AI’s word.</p>
+      <div class="kpis">${(k?.kpis||[]).map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
   }
 
 
@@ -411,6 +406,7 @@ function roadmap(){
     { n:'18', t:'M4 · Sign in and own your sites', s:'next', d:'Magic-link sign-in on the board; every project has an owner; a two-user test proves nobody sees anyone else\'s work. Email via the existing naples.agency SMTP.' },
     { n:'19', t:'M5 · The agency talks back', s:'next', d:'Form submissions email the site owner instantly; a permanently stuck build alerts the operator on Telegram instead of waiting silently on the dashboard.' },
     { n:'20', t:'M6 · The agency sells itself', s:'next', d:'Pricing + Stripe checkout: a stranger pays, gets an account, submits a brief, watches it build. Money in, product out, zero humans. See PLAN.md — the plan of record.' },
+    { n:'21', t:'Mission-rooted differentiation', s:'next', d:'The agency way: everything follows the client’s mission — like a Shopify build where theme, apps and categories all serve the store’s purpose. Today five design languages + per-brief branding/structure exist; next: deeper visual variety (nav styles, layout rhythms, section variants), mission-driven capability choices, and richer brand systems — so two cafés never feel like the same site.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -440,7 +436,7 @@ function about(){
       <div class="step"><div><b>1 · Plan</b><span class="muted">It reads your brief and breaks it into steps with dependencies.</span></div></div>
       <div class="step"><div><b>2 · Build, stage by stage</b><span class="muted">Independent steps run in parallel; dependent ones wait their turn.</span></div></div>
       <div class="step"><div><b>3 · Verify, never trust</b><span class="muted">A step is only “done” when a deterministic check passes — structural HTML, real assets, and working links.</span></div></div>
-      <div class="step"><div><b>4 · Ship</b><span class="muted">A real, full-featured website — or app with a live database — verified by a real browser clicking every link, submitting the form, and checking the data persists.</span></div></div>
+      <div class="step"><div><b>4 · Ship — and keep working</b><span class="muted">A real website or full-stack app, served live from its CMS, verified by a real browser clicking every link and submitting every form. After launch: every lead is emailed to the owner, and a Rebuild evolves the site without losing a row of data.</span></div></div>
     </div>
     <p style="margin-top:32px"><a class="btn" href="#/">Build my first site →</a></p>
   </div></div>`;
@@ -509,14 +505,15 @@ function review(){
 function docsPage(){
   // the production line: brief -> reliable product. The LLM DECIDES; the system BUILDS.
   const stages = [
-    { n:'1', t:'Brief', d:'You describe the product in one sentence — a bakery page, a delivery app, anything.' },
-    { n:'2', t:'Plan', d:'An LLM explodes the brief into a dependency graph of tasks — one build per page, one shared navigation.' },
-    { n:'3', t:'Board', d:'The whole graph lives in Postgres. An SQL trigger unblocks a task the instant its dependencies pass, so the scheduler stays dumb and restart-safe.' },
-    { n:'4', t:'Spec', d:'The build agent never writes HTML. It returns a small JSON spec: the brand (name, two colours, fonts) and an ordered list of sections with the real copy.' },
-    { n:'5', t:'Render', d:'A deterministic renderer assembles the page from hand-built, vetted components. Navigation, spacing, fonts, the responsive menu and WCAG-safe colours are guaranteed by construction — the model cannot break them.' },
+    { n:'1', t:'Brief', d:'You describe the product in one sentence — a landing page, a bakery site, a booking app, anything. The shape (landing vs multi-page) and archetype (site / app / store) are detected in code, never guessed.' },
+    { n:'2', t:'Plan', d:'An LLM writes a bespoke dependency graph for THIS brief — research, branding, content, a real database step for apps. The whole graph lives in Postgres; an SQL trigger unblocks each step the instant its dependencies pass, so a crash or restart never loses work.' },
+    { n:'3', t:'Database', d:'An app or store brief gets its OWN isolated Postgres schema, compiled from a typed data model — real keys, relations, indexes, seed records. On a rebuild the schema is MIGRATED, never dropped: your data survives.' },
+    { n:'4', t:'Compose', d:'ONE model for the whole site. The composer chooses every page’s sections and writes the real copy in a single pass — so brand, tone and navigation cannot drift between pages. The business name itself is system-owned and injected deterministically.' },
+    { n:'5', t:'Render', d:'A deterministic renderer projects each page from that one model using hand-built, vetted components. Forms are compiled from the database schema — right fields, typed validation, dropdowns listing real records. Navigation, spacing, fonts and WCAG-safe colours are correct by construction.' },
     { n:'6', t:'Media', d:'Real photography is pulled from Pexels, downloaded and served locally — no hotlinks, no grey placeholders.' },
-    { n:'7', t:'Verify', d:'A deterministic check proves the page is sound — valid structural HTML, no external or placeholder assets, no dead links, wired forms. No browser needed: the page is correct by construction. Never the agent’s word; a failure retries with the reason.' },
-    { n:'8', t:'Ship', d:'A real, self-contained website at /sites/:id you can open, edit and share.' },
+    { n:'7', t:'Verify', d:'Deterministic gates at every step — the model rejects into a retry with the reason, never ships broken. Then a REAL browser uses the finished site: clicks every button, submits the form, checks the data landed. High-severity findings trigger an automatic re-compose and re-review (bounded).' },
+    { n:'8', t:'CMS', d:'The finished site is pushed into Directus and re-served THROUGH it, proven by a mutation test: a change written via the CMS must appear in the served page. From then on pages render fresh from the CMS on every request — edit content, see it live, no rebuild.' },
+    { n:'9', t:'Ship', d:'A real, verified website at /sites/:id — and it keeps working for its owner: every form submission is emailed to them within seconds, and a Rebuild evolves the site without losing a single row of data.' },
   ];
   // the vetted pieces the renderer composes from — the puzzle, not the magic
   const blocks = [
@@ -540,7 +537,9 @@ function docsPage(){
     { t:'Full-stack + database', b:'live', d:'An app/store brief gets its OWN isolated Postgres schema — a typed data model compiled into flawless DDL, seeded, read back on the page, and introspected in the Data tab.' },
     { t:'Rooted identity', b:'live', d:'Five design languages; the brief picks one and the renderer expands it into typography, rhythm and shape — never one template recoloured.' },
     { t:'Visual QA', b:'live', d:'Every finished site is screenshotted on mobile and desktop and scored by a vision model.' },
-    { t:'Interaction QA', b:'live', d:'A real browser clicks every button, submits the form and checks the data — verdict shown on each project.' },
+    { t:'Interaction QA', b:'live', d:'A real browser clicks every button, submits the form and checks the data — verdict shown on each project. High findings trigger automatic self-repair.' },
+    { t:'Rebuild without data loss', b:'live', d:'Update the brief, rebuild in place: branding survives, the database is migrated (new fields appear, every row kept — guarded by an automatic rollback).' },
+    { t:'Lead email alerts', b:'live', d:'Every form submission on a produced site is emailed to its owner within seconds, from the agency’s own authenticated address.' },
   ];
   const infra = [
     { t:'Relay server', d:'systemd · Restart=always', s:'ok' },
@@ -550,14 +549,18 @@ function docsPage(){
     { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
     { t:'Real photography', d:'Pexels · downloaded + served locally', s:'ok' },
     { t:'Visual QA', d:'vision model · mobile + desktop', s:'ok' },
+    { t:'Lead email', d:'SMTP · SPF/DKIM/DMARC · status at mail.naples.agency', s:'ok' },
   ];
   const verify = [
-    ['site_renders','static: valid structural HTML, no external/placeholder assets, no dead CTA, wired forms — no browser (pages correct by construction)'],
+    ['site_model','the composed site model: every page present, hero-first, real copy (no slop/placeholders); a landing page must be exactly 1 page with ≥2 proof/offer sections ending in a CTA; an app must carry its typed form'],
+    ['site_renders','valid structural HTML, no external/placeholder assets, no dead CTA, wired forms'],
+    ['site_consistent','one logo, one palette, one navigation — identical across every page of the site'],
+    ['served_from_cms','a sentinel written through the CMS must surface in the re-served page — proof the site is genuinely CMS-served, not a static copy'],
     ['app_db','the app’s own isolated Postgres schema actually provisions and has its tables'],
+    ['migration guard','a rebuild runs additive-only migrations in one transaction — if any table would lose rows, everything rolls back'],
     ['wcag','AA contrast on text vs background — derived by the renderer, so always binding'],
-    ['json · json:keys','output must parse and carry the required keys'],
-    ['sql_applies','the SQL actually runs against Postgres'],
-    ['min · contains · nonempty','length + substring floors'],
+    ['json · sql_applies','output must parse / the SQL actually runs against Postgres'],
+    ['interaction review','a real browser clicks every button, loads every link target, submits the form and checks the row persisted — verdict shown on every project'],
   ];
   const REPO='https://github.com/naoufac/agency-pipeline/blob/master';
   app.innerHTML = `<div class="container section">

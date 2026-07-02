@@ -1,4 +1,5 @@
 import pg from 'pg';
+import * as appdb from './appdb.ts';
 
 export type Kpi = { key: string; label: string; value: string; sub: string; group: 'quality' | 'efficiency' | 'signal'; tone: 'good' | 'warn' | 'bad' | 'neutral' };
 
@@ -50,31 +51,44 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
      group by 1 order by n desc`)).rows;
   const provTotal = providers.reduce((s: number, p: any) => s + Number(p.n), 0) || 1;
 
+  // OWNER-FIRST METRICS (audited 2026-07-02): every number is verifiable against the DB and answers
+  // a question a site owner actually has. Engineering telemetry (parallelism, critical-path latency,
+  // LLM provider split) left the board — providers stay in the payload for the CLI/ops only.
+  const pagesVerified = tasks.filter(t => t.verify === 'site_renders' && t.status === 'done').length;
+  const pagesPlanned = tasks.filter(t => t.verify === 'site_renders').length;
+  const review = (await pool.query('select passed, checked from dogfood_reviews where project_id=$1 order by id desc limit 1', [p.id])).rows[0];
+  const formsChecked = review?.checked?.forms ?? null;
+  const cmsBuilt = !!(p.params && p.params.cms_built);
+  const leads = Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [p.id])).rows[0].n);
+  let dataRows = 0;
+  try { for (const t of (await appdb.describeSchema(pool, p.id)).tables) dataRows += Number(t.rows || 0); } catch {}
+  const rebuilds = Number(p.params?.rebuilds || 0);
+  const mins = wall >= 60 ? `${Math.floor(wall / 60)}m ${Math.round(wall % 60)}s` : `${wall.toFixed(0)}s`;
+
   const kpis: Kpi[] = [
-    { group: 'quality',    key: 'completion',  label: 'Completion',        value: pct(done, total) + '%', sub: `${done}/${total} shipped`,             tone: done === total && total ? 'good' : failed ? 'bad' : 'warn' },
-    { group: 'quality',    key: 'firstpass',   label: 'First-pass verify', value: pct(firstPass, done || 1) + '%', sub: `${firstPass}/${done} no retry`, tone: deadlocked ? 'bad' : (firstPass === done ? 'good' : 'warn') },
-    { group: 'quality',    key: 'rework',      label: 'Rework rate',       value: (reworks / (total || 1)).toFixed(2), sub: `${reworks} verify-fails`,   tone: reworks === 0 ? 'good' : 'warn' },
-    { group: 'efficiency', key: 'wall',        label: 'Wall-clock',        value: wall.toFixed(0) + 's', sub: (done / (wall / 60 || 1)).toFixed(1) + ' tasks/min', tone: 'neutral' },
-    { group: 'efficiency', key: 'latency',     label: 'Latency / layer',   value: critical ? (wall / critical).toFixed(0) + 's' : '—', sub: `${critical} layers`, tone: 'neutral' },
-    { group: 'signal',     key: 'parallel',    label: 'Parallelism',       value: critical ? (total / critical).toFixed(2) + '×' : '—', sub: `${total}→${critical} layers`, tone: 'neutral' },
-    { group: 'signal',     key: 'reliability', label: 'Agent reliability', value: pct(attempts - errors, attempts || 1) + '%', sub: `${errors} err / ${attempts} calls`, tone: deadlocked ? 'bad' : (errors === 0 ? 'good' : 'warn') },
-    { group: 'signal',     key: 'rigor',       label: 'Verification rigor', value: rigor + '%', sub: `${realCheck}/${total} real checks`,                tone: rigor >= 60 ? 'good' : rigor >= 40 ? 'warn' : 'bad' },
-    {
-      group: 'signal',
-      key: 'llm_provider',
-      label: 'LLM provider split (7d)',
-      value: providers.map((p: any) => `${p.p} ${Math.round(100 * Number(p.n) / provTotal)}%`).join(' · ') || '—',
-      sub: providers.map((p: any) => `${p.p}: ${p.n} calls, avg ${p.avg_ms}ms`).join(' · ') || 'no data yet',
-      tone: 'neutral',
-    },
-    {
-      group: 'efficiency',
-      key: 'llm_latency',
-      label: 'LLM latency (avg, 7d)',
-      value: providers.length ? `${providers.reduce((s: number, p: any) => s + Number(p.avg_ms), 0) / providers.length | 0}ms` : '—',
-      sub: providers.map((p: any) => `${p.p} ${p.avg_ms}ms`).join(' · ') || 'no data yet',
-      tone: 'neutral',
-    },
+    { group: 'quality', key: 'live', label: 'Site status',
+      value: deadlocked ? 'Blocked' : !finished ? 'Building' : failed ? 'Finished (issues)' : 'Live',
+      sub: cmsBuilt ? 'served live from the CMS (proven)' : 'static serving',
+      tone: deadlocked ? 'bad' : !finished ? 'warn' : failed ? 'warn' : 'good' },
+    { group: 'quality', key: 'pages', label: 'Pages verified',
+      value: `${pagesVerified}/${pagesPlanned || '—'}`, sub: 'each passed the render + consistency gates',
+      tone: pagesPlanned && pagesVerified === pagesPlanned ? 'good' : 'warn' },
+    { group: 'quality', key: 'review', label: 'Browser review',
+      value: review ? (review.passed ? 'Passed' : 'Issues found') : '—',
+      sub: review ? `a real browser clicked every button${formsChecked ? ` · ${formsChecked} form(s) submitted + persisted` : ''}` : 'runs when the build finishes',
+      tone: review ? (review.passed ? 'good' : 'bad') : 'neutral' },
+    { group: 'signal', key: 'data', label: 'Data collected',
+      value: String(leads + dataRows), sub: `${leads} form submission(s) · ${dataRows} database row(s)`,
+      tone: 'neutral' },
+    { group: 'efficiency', key: 'wall', label: 'Build time',
+      value: mins, sub: rebuilds ? `rebuilt ${rebuilds}× — data preserved` : 'brief to live, zero humans',
+      tone: 'neutral' },
+    { group: 'quality', key: 'firstpass', label: 'Right first try',
+      value: pct(firstPass, done || 1) + '%', sub: `${firstPass}/${done} steps passed without a retry`,
+      tone: deadlocked ? 'bad' : (firstPass === done ? 'good' : 'warn') },
+    { group: 'signal', key: 'rigor', label: 'Independently checked',
+      value: rigor + '%', sub: `${realCheck}/${total} steps proven by an external check, not the AI's word`,
+      tone: rigor >= 60 ? 'good' : rigor >= 40 ? 'warn' : 'bad' },
   ];
 
   return {
@@ -83,5 +97,6 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
     totals: { total, done, active, blocked, failed },
     chars,
     kpis,
+    providers,   // ops-only telemetry (CLI); the board does not render this
   };
 }

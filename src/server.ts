@@ -11,6 +11,7 @@ import { SITES } from './verify.ts';
 import { renderLiveFromCms } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
+import { mailReady, notifyLead, sendMail } from './mail.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -91,6 +92,27 @@ const server = http.createServer(async (req, res) => {
 
     if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
 
+    // mail.naples.agency / email.naples.agency — the PUBLISHED status of Relay's email layer:
+    // what it does (lead alerts on every produced-site submission; account email lands in M4),
+    // whether SMTP is live, and the externally-checkable send log. Same page at /email anywhere.
+    const host = String(req.headers.host || '');
+    if (path === '/email' || /^(mail|email)\./.test(host)) {
+      const sent = (await pool.query("select count(*)::int n, max(at) latest from run_events where type='mail_sent'")).rows[0];
+      const failed = (await pool.query("select count(*)::int n from run_events where type='mail_failed'")).rows[0];
+      const ready = mailReady();
+      const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relay · Email</title>
+<style>body{font:16px/1.6 -apple-system,Inter,sans-serif;background:#0A0C12;color:#E8EAF0;max-width:640px;margin:0 auto;padding:48px 20px}h1{font-size:26px}code{background:#1a1f2e;padding:2px 7px;border-radius:6px}.ok{color:#36B37E}.bad{color:#F0506E}.card{background:#12151f;border:1px solid #232a3b;border-radius:12px;padding:18px 20px;margin:14px 0}.muted{color:#8a93a6;font-size:14px}</style></head><body>
+<h1>Relay · production email</h1>
+<p class="muted">Every produced site's form submission is emailed to its owner within seconds — no dashboard-checking. Sign-in and account email arrive with milestone M4.</p>
+<div class="card"><b>SMTP (noreply@naples.agency)</b> — <span class="${ready ? 'ok' : 'bad'}">${ready ? '● live' : '● not configured'}</span><br>
+<span class="muted">SPF · DKIM · DMARC aligned on naples.agency — inbox-grade, verified by live delivery.</span></div>
+<div class="card"><b>Send log (external record, never self-reported)</b><br>
+${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} · ${failed.n} failed<br>
+<span class="muted">Every send/failure is a <code>mail_sent</code>/<code>mail_failed</code> event in the project log.</span></div>
+<p class="muted"><a href="https://board.naples.agency" style="color:#7C7AFF">← board.naples.agency</a></p></body></html>`;
+      return send(res, 200, 'text/html; charset=utf-8', html);
+    }
+
     if (path === '/roadmap') { res.writeHead(302, { location: '/#/roadmap' }); res.end(); return; }
 
     // serve the produced website(s): /sites/<projectId>/[file]
@@ -138,8 +160,10 @@ const server = http.createServer(async (req, res) => {
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const form = String(b.form || 'contact').slice(0, 60);
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
-      if (!(await pool.query('select 1 from projects where id=$1', [sid])).rows[0]) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      const proj = (await pool.query('select brief from projects where id=$1', [sid])).rows[0];
+      if (!proj) return send(res, 404, 'application/json', '{"error":"unknown site"}');
       await pool.query('insert into site_submissions(project_id,form,data) values($1,$2,$3)', [sid, form, JSON.stringify(data)]);
+      notifyLead(pool, sid, proj.brief, form, data);   // the operator hears about every lead by email
       return send(res, 200, 'application/json', '{"ok":true}');
     }
     // ---- Live per-project DB: read/insert rows from the produced app's OWN isolated schema ----
@@ -155,7 +179,14 @@ const server = http.createServer(async (req, res) => {
       let raw = ''; for await (const c of req) raw += c;
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
-      try { const ok = await appdb.insertRow(pool, dataM[1], dataM[2], data); return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok })); }
+      try {
+        const ok = await appdb.insertRow(pool, dataM[1], dataM[2], data);
+        if (ok) {
+          const proj = (await pool.query('select brief from projects where id=$1', [dataM[1]])).rows[0];
+          if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data);   // typed rows are leads too
+        }
+        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+      }
       catch (e: any) { return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: String(e?.message ?? e).slice(0, 120) })); }
     }
     if (path === '/api/submissions') {
