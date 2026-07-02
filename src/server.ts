@@ -101,7 +101,18 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://' + (req.headers.host || 'localhost'));
     const path = url.pathname;
 
-    if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
+    if (path === '/healthz') {
+      // the uptime monitor trusts this — it must NEVER say ok while the database is down
+      try { await pool.query('select 1'); return send(res, 200, 'text/plain', 'ok'); }
+      catch { return send(res, 503, 'text/plain', 'db unavailable'); }
+    }
+
+    // HONEST INPUTS (API rating fix): an id that isn't a UUID can never be a project — answer with a
+    // clean 404 instead of letting Postgres throw a 500 that leaks query internals. One guard, every
+    // ?id= endpoint covered.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const qid = url.searchParams.get('id');
+    if (path.startsWith('/api/') && qid && !UUID_RE.test(qid)) return send(res, 404, 'application/json', '{"error":"unknown project","project":null,"tasks":[],"edges":[],"submissions":[],"reviews":[]}');
 
     // M4 — who is asking? Resolved once per API request; /sites and static stay auth-free (public web).
     const user: User | null = path.startsWith('/api/') ? await userFromCookie(pool, req.headers.cookie) : null;
@@ -193,6 +204,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
 
     // ---- Full-stack: a produced site's form posts here -> Postgres ----
     const submitM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/submit$/i);
+    if (submitM && !UUID_RE.test(submitM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
     if (submitM && req.method === 'POST') {
       const sid = submitM[1];
       const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
@@ -209,6 +221,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     }
     // ---- Live per-project DB: read/insert rows from the produced app's OWN isolated schema ----
     const dataM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/data\/([a-zA-Z_][a-zA-Z0-9_]{0,62})$/);
+    if (dataM && !UUID_RE.test(dataM[1])) return send(res, 404, 'application/json', '{"rows":[],"error":"unknown site"}');
     if (dataM && req.method === 'GET') {
       if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"rows":[],"error":"rate limited"}');
       try { return send(res, 200, 'application/json', JSON.stringify({ rows: await appdb.readRows(pool, dataM[1], dataM[2], Number(url.searchParams.get('limit') || 50)) })); }
