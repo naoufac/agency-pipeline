@@ -53,8 +53,8 @@ function briefBar(){
 }
 async function submitBrief(){
   const input = document.getElementById('brief'); const brief = input.value.trim(); if (!brief) return;
-  const btn = document.getElementById('go'); btn.textContent = 'Building your CMS site…'; btn.disabled = true;
-  try { const r = await j('/api/cms-run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
+  const btn = document.getElementById('go'); btn.textContent = 'Building your site…'; btn.disabled = true;
+  try { const r = await j('/api/run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
         location.hash = '#/p/' + r.id; } catch { btn.textContent = 'Build my site →'; btn.disabled = false; }
 }
 // one card's inner HTML — STABLE preview URL (no cache-bust → browser caches it, never re-fetches)
@@ -395,7 +395,7 @@ function roadmap(){
     { n:'09', t:'Rooted identity', s:'done', d:'The brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape. The chosen language is applied consistently to every page of a site — verified identical across pages on the live build, not re-rolled per page.' },
     { n:'10', t:'Full-stack + database', s:'progress', d:'Mechanism live but not yet the default path: an app/store brief can get an isolated Postgres schema compiled from a typed data model (keys, relations, indexes), read back on the page. Exercised on 1 of 4 projects so far — real, still maturing toward every applicable brief.' },
     { n:'11', t:'Interaction QA', s:'done', d:'A real browser then uses every finished site — clicks every button, types into and submits the form, checks the data came through, measures the layout on phone + desktop. Verification by interaction, not just a screenshot. The verdict shows on each project.' },
-    { n:'12', t:'CMS-native generation (the core)', s:'progress', d:'GOAL, in active build: every generated site is built on a REAL headless CMS — one of Drupal, Payload, Craft, Sanity, Directus — chosen per project (all 5 integrated, exactly one per project), with content living in and served from the CMS. This REPLACES the previous “Editable CMS”, which was only an inline text editor (a regex string-overlay on frozen HTML), not a CMS. Not shipped — see GOAL.md.' },
+    { n:'12', t:'CMS-native generation (the core)', s:'done', d:'Every generated site is built on ONE real headless CMS — Directus — with content living in and served live from the CMS, proven by a zero-trust gate (a sentinel written through the CMS must surface in the re-served HTML). The earlier 5-CMS ambition and the parallel WordPress generator are retired: one pipeline, one CMS, every brief. See GOAL.md.' },
     { n:'13', t:'Robust browser layer', s:'done', d:'Killed spawn-per-call chromium + hand-rolled CDP-over-ws (the source of recurring "chromium didn\'t come up" breakage) → ONE persistent Playwright browser (src/browser.ts, Playwright\'s own Chromium, context-per-call, concurrency-gated) behind every browser path. Removed the redundant screenshot from the verify hot path (site_renders is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in worker process (src/worker.ts, RELAY_BUILD=0 flag) for horizontal build scale.' },
     { n:'14', t:'Web-grounded intelligence', s:'progress', d:'Wired: the planner + research/strategy departments call a MiniMax reasoning model via OpenRouter with the server-side web-search plugin (keys are set). But there is no persisted record of a successful web-grounded run yet — so it is wired, not proven. Held at in-progress until a real run is logged.' },
     { n:'15', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
@@ -525,7 +525,7 @@ function docsPage(){
   // one engine, many layers — the brief decides which apply. No discrimination.
   const layers = [
     { t:'Website', b:'live', d:'A multi-page site with one consistent navigation and brand across every page.' },
-    { t:'CMS-native', b:'in build', s:'progress', d:'Every site is moving onto a real headless CMS — Drupal, Payload, Craft, Sanity or Directus, one chosen per project. Replaces the old inline text editor. Not yet live.' },
+    { t:'CMS-native', b:'live', d:'Every site is built on ONE real headless CMS — Directus. Content lives in the CMS and pages are served live from it; a zero-trust gate proves it on every build. Replaces the old inline text editor and the retired 5-CMS plan.' },
     { t:'Full-stack + database', b:'live', d:'An app/store brief gets its OWN isolated Postgres schema — a typed data model compiled into flawless DDL, seeded, read back on the page, and introspected in the Data tab.' },
     { t:'Rooted identity', b:'live', d:'Five design languages; the brief picks one and the renderer expands it into typography, rhythm and shape — never one template recoloured.' },
     { t:'Visual QA', b:'live', d:'Every finished site is screenshotted on mobile and desktop and scored by a vision model.' },

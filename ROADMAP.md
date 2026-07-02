@@ -7,7 +7,7 @@ Where we've been, where we are, where we're going. See [`MISSION.md`](MISSION.md
 ---
 
 ## The one goal (current — see `GOAL.md`)
-**Every generated site is built on a real headless CMS — one of Drupal, Payload, Craft, Sanity, Directus — chosen per project (all 5 integrated, exactly one per project), with content living in and served from the CMS.** This replaces the old "Editable CMS" (an inline text editor, not a CMS). Status corrections to the history below are tracked in `docs/HONESTY-AUDIT.md` — a prior version over-marked items as shipped.
+**A brief goes in; a real, verified, CMS-served website comes out — zero humans in between. ONE pipeline, ONE CMS: every site is built on Directus** (hardcoded, enforced by `npm run cms:check`), with content living in and served from the CMS. The earlier "5 CMS, one per project" goal and the parallel WordPress/WooCommerce build path are retired by owner decision (2026-07-02) — they produced two competing build systems and inconsistent output. This also replaces the old "Editable CMS" (an inline text editor, not a CMS). Status corrections to the history below are tracked in `docs/HONESTY-AUDIT.md` — a prior version over-marked items as shipped.
 
 ---
 

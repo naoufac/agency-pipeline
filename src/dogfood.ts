@@ -141,22 +141,37 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl?: st
     }
     await ev(pool, projectId, null, 'dogfood', summary);
 
-    // SELF-CORRECTING LOOP: re-open the affected page build(s) with the findings as feedback (one round).
+    // SELF-CORRECTING LOOP (one round). Content findings live in the composed SITE MODEL — page renders
+    // are deterministic projections of it, so re-rendering alone can never fix them (and the old query
+    // targeted department='build', which the CMS-first planner no longer creates: the loop was dead).
+    // Repair = re-block every render + QA, then re-open COMPOSE with the findings as feedback (the
+    // runner feeds the latest verify_failed on a task back into its prompt); the fn_unblock trigger
+    // cascades render → qa as the new model lands. Legacy per-page 'build' projects (eval harness)
+    // keep the direct per-page re-open.
     if (high) {
       const repairs = Number((await pool.query("select count(*)::int n from run_events where project_id=$1 and type='dogfood_repair'", [projectId])).rows[0].n);
       const pageSlugs = ((await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params?.pages || []).map((p: any) => p.slug);
       const plan = repairPlan(issues, pageSlugs);
       if (plan.length && repairs < 1) {
+        const compose = (await pool.query("select id from tasks where project_id=$1 and department='compose'", [projectId])).rows[0];
         let reopened = 0;
-        for (const { slug, notes } of plan) {
-          const t = (await pool.query("select id from tasks where project_id=$1 and department='build' and artifact=$2", [projectId, slug + '.html'])).rows[0];
-          if (!t) continue;
-          await ev(pool, projectId, t.id, 'verify_failed', `interaction review found problems on this page — FIX them: ${notes.slice(0, 4).join(' · ')}`);
-          await pool.query("update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [t.id]);
-          reopened++;
+        if (compose) {
+          const notes = plan.map(({ slug, notes }) => `${slug}: ${notes.slice(0, 4).join(' · ')}`).join(' — ');
+          await pool.query("update tasks set status='blocked', claimed_by=null, lease_expires_at=null, updated_at=now() where project_id=$1 and department in ('render','qa')", [projectId]);
+          await ev(pool, projectId, compose.id, 'verify_failed', `interaction review found problems the site model must FIX: ${notes}`.slice(0, 1800));
+          await pool.query("update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [compose.id]);
+          reopened = plan.length;
+        } else {
+          for (const { slug, notes } of plan) {
+            const t = (await pool.query("select id from tasks where project_id=$1 and department='build' and artifact=$2", [projectId, slug + '.html'])).rows[0];
+            if (!t) continue;
+            await ev(pool, projectId, t.id, 'verify_failed', `interaction review found problems on this page — FIX them: ${notes.slice(0, 4).join(' · ')}`);
+            await pool.query("update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [t.id]);
+            reopened++;
+          }
         }
         if (reopened) {
-          await ev(pool, projectId, null, 'dogfood_repair', `re-building ${reopened} page(s) from the interaction review (round ${repairs + 1})`);
+          await ev(pool, projectId, null, 'dogfood_repair', `${compose ? 're-composing the site model + re-rendering every page' : `re-building ${reopened} page(s)`} from the interaction review (round ${repairs + 1})`);
           await pool.query("update projects set status='running' where id=$1", [projectId]);
           const { runLoop } = await import('./runner.ts');
           runLoop(pool, projectId, { cap: 4, review: true }).catch(() => {});   // rebuild, then re-review

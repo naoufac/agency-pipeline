@@ -1,5 +1,6 @@
-// CmsTarget — the contract every one of the 5 headless CMS implements so Relay builds a site ON it
-// (not static HTML with a text editor bolted on). Design notes live in docs/CMS-ARCHITECTURE.md.
+// CmsTarget — the contract Relay's CMS implements so every site is built ON it (not static HTML with
+// a text editor bolted on). ONE CMS: Directus. The type system enforces it — adding a second CMS is a
+// deliberate code change here, never a runtime choice. Design notes live in docs/CMS-ARCHITECTURE.md.
 //
 // Principles carried over from the rest of Relay:
 //  - Deterministic where it can be; the LLM NEVER authors schema (modelContentTypes consumes the
@@ -10,8 +11,8 @@
 import type { Archetype } from '../archetype.ts';
 import type { ThemeName } from '../themes.ts';
 
-export type CmsName = 'directus' | 'payload' | 'sanity' | 'craft' | 'drupal';
-export const CMS_NAMES: CmsName[] = ['directus', 'payload', 'sanity', 'craft', 'drupal'];
+export type CmsName = 'directus';
+export const CMS_NAMES: CmsName[] = ['directus'];
 export function isCmsName(x: any): x is CmsName {
   return typeof x === 'string' && (CMS_NAMES as string[]).includes(x);
 }
@@ -44,7 +45,7 @@ export interface BuildCtx {
   sitesDir: string;     // where /sites/<id>/ artifacts are written
 }
 
-// The contract. See docs/CMS-ARCHITECTURE.md for how each maps onto Directus/Payload/Sanity/Drupal/Craft.
+// The contract. See docs/CMS-ARCHITECTURE.md for how it maps onto Directus.
 export interface CmsTarget {
   readonly id: CmsName;
 

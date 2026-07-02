@@ -1,8 +1,15 @@
 # CMS-native generation — architecture (the core goal)
 
-See `GOAL.md`. Every generated site is built **on** a real headless CMS — one of **Drupal,
-Payload, Craft, Sanity, Directus** — chosen once per project, all 5 integrated, exactly one per
-project. This replaces `src/cms.ts` (a regex string-overlay text editor, not a CMS).
+> **DECISION 2026-07-02 — ONE CMS.** The 5-CMS design below is retired (see `GOAL.md`). Every
+> site is built on **Directus only**, hardcoded in the planner; the selector, the stub adapters
+> (payload/drupal/sanity/craft) and the WordPress/WooCommerce generator are deleted. `npm run
+> cms:check` enforces the invariant. Sections referring to 5 CMS / rotation / use-case routing
+> are kept as history only — the CmsTarget contract, isolation model, and the servedFromCms
+> mutation-proof gate remain exactly as described.
+
+See `GOAL.md`. Every generated site is built **on** a real headless CMS — **Directus** —
+with content living in and served from the CMS. This replaces `src/cms.ts` (a regex
+string-overlay text editor, not a CMS).
 
 Grounded in current-web research (5 CMS profiled June 2026) + the synthesis in this session.
 

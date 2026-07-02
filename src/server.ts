@@ -9,8 +9,6 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { renderLiveFromCms } from './cms/live.ts';
-import { generateWordpressSite } from './cms/wordpress.ts';
-import { classifyUseCase, ENGINE_FOR } from './cms/usecase.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 
@@ -220,28 +218,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 
-    // CMS-NATIVE build: a brief -> a REAL, isolated, branded WordPress site (its own theme + admin).
-    if (path === '/api/cms-run' && req.method === 'POST') {
-      const ip = clientIp(req);
-      if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
-      let raw = ''; for await (const c of req) raw += c;
-      let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
-      if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
-      const usecase = classifyUseCase(brief);
-      const ecom = usecase === 'ecom';
-      const params = { engine: ENGINE_FOR[usecase], use_case: usecase, planner: 'cms', cms_status: 'building' };
-      const pr = await pool.query('insert into projects(brief, params, status) values ($1,$2,$3) returning id', [brief, params, 'running']);
-      const id = pr.rows[0].id;
-      // forced use-case routing (code decides) → build the real branded site async (never blocks)
-      generateWordpressSite(brief, ecom).then((s) =>
-        pool.query("update projects set status='done', params = params || $2::jsonb where id=$1",
-          [id, JSON.stringify({ cms_status: 'done', wp_url: s.url, wp_admin: s.adminUrl, slug: s.slug, site_name: s.siteName, shop_url: s.shopUrl || null })])
-      ).catch((e: any) =>
-        pool.query("update projects set status='blocked', params = params || $2::jsonb where id=$1",
-          [id, JSON.stringify({ cms_status: 'failed', error: String(e?.message ?? e).slice(0, 300) })]).catch(() => {})
-      );
-      return send(res, 200, 'application/json', JSON.stringify({ id }));
-    }
+    // ONE pipeline, ONE CMS. The old /api/cms-run (a parallel WordPress generator that bypassed the
+    // planner/verify/QA pipeline entirely) is retired — every brief flows through /api/run. Existing
+    // WP-built projects keep serving from their container; the board still renders them read-only.
+    if (path === '/api/cms-run' && req.method === 'POST')
+      return send(res, 410, 'application/json', JSON.stringify({ error: 'retired — use /api/run (one pipeline, one CMS)' }));
 
     const file = STATIC[path];
     if (file) {

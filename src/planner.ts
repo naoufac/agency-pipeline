@@ -2,7 +2,6 @@ import pg from 'pg';
 import { llm } from './agents.ts';
 import { themeFor, type ThemeName } from './themes.ts';
 import { archetypeFor, needsData, type Archetype } from './archetype.ts';
-import { selectCms } from './cms/select.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
@@ -138,9 +137,10 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   // Both paths flow through validate(), so the fallback gets the same archetype/database/verify wiring.
   const { plan: result, usedLLM } = await buildPlan(brief);
   const { tasks, pages, theme, archetype } = result;
-  // The CMS the whole site is built ON — chosen ONCE, deterministically, brief-rooted (params.cms,
-  // alongside theme/archetype). An LLM-named cms is honoured only if it's in the closed set of 5.
-  const cms = selectCms((result as any).cms, brief, archetype);
+  // ONE CMS, forced in code — never selected, never rotated, never named by an LLM. Every site is
+  // built on Directus (the proven adapter: real e2e proof + servedFromCms gate). The old per-brief
+  // 5-CMS selector is deleted; `npm run cms:check` asserts this invariant holds.
+  const cms = 'directus';
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, cms };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
