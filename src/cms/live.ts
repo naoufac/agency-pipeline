@@ -50,8 +50,10 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const row = await appdb.readRow(pool, projectId, 'products', productId);   // the deterministic store contract table
   if (!row) return null;
   const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
-  // back-link to the page that actually CARRIES the products grid (the composed model), never a slug guess
-  const withProducts = params.site.pages.find((p: any) => (p.sections || []).some((s: any) => s.type === 'products'));
+  // back-link to the page that actually CARRIES the products grid (the composed model), never a slug
+  // guess — and when the grid is on several pages (home + shop), prefer the dedicated one over home.
+  const prodPages = params.site.pages.filter((p: any) => (p.sections || []).some((s: any) => s.type === 'products'));
+  const withProducts = prodPages.find((p: any) => p.slug !== 'index') || prodPages[0];
   const back = withProducts ? { slug: withProducts.slug, title: withProducts.title } : navPages[0];
   const cartPage = navPages.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
   const title = String(row.title || row.name || 'Product #' + productId);
