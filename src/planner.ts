@@ -2,10 +2,11 @@ import pg from 'pg';
 import { llm } from './agents.ts';
 import { themeFor, type ThemeName } from './themes.ts';
 import { archetypeFor, needsData, type Archetype } from './archetype.ts';
+import { shapeFor, type Shape } from './landing.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
-type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archetype };
+type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archetype; shape: Shape };
 
 // Bind a department to its REAL deterministic gate — no `min:280` theatre where a true check exists.
 // (kpi.ts counts only sql_applies/site_renders/wcag/json* as rigor; min/nonempty are honest floors.)
@@ -29,12 +30,14 @@ const PLANNER_SYS = `You are the Planner for an automated agency that ships a re
 Output ONLY JSON (no prose, no fences):
 {"theme":"editorial|modern|warm|bold|minimal",
  "archetype":"site|app|store",
+ "shape":"landing|multi",
  "pages":[{"slug":"index","title":"Home"},{"slug":"about","title":"About"}, ...],
  "tasks":[{"seq":1,"title":"...","department":"research","depends_on":[]}, ...]}
 
 Rules:
 - "theme": the design language that best fits the brief — editorial (law/finance/architecture/luxury — serif, refined), modern (saas/product/tech — geometric sans), warm (cafe/bakery/wellness/craft — soft, rounded), bold (agency/fitness/events/fashion — oversized, high-energy), minimal (portfolio/photography/studio — spare). Pick exactly one.
 - "archetype": "site" for a presentation/marketing site; "app" when the brief is software with data (delivery app, booking, marketplace, directory, SaaS, dashboard); "store" for shops/e-commerce/catalogs. If "app" or "store", INCLUDE a "database" task whose output is a runnable PostgreSQL schema for the brief's entities — it is verified by actually applying the SQL.
+- "shape": "landing" when the brief asks for a landing/sales/squeeze/one-page conversion page — a landing project has EXACTLY ONE page: [{"slug":"index","title":"Home"}]. Otherwise "multi".
 - "pages": 2 to 5 pages tailored to the brief. The FIRST page MUST be {"slug":"index","title":"Home"}. Slugs are lowercase, url-safe, no extension (e.g. "about","services","menu","contact","pricing").
 - "tasks": 4 to 7 THINKING steps only (research, strategy, branding, content/IA, copywriting, media, design, and database for app/store) in dependency order; depends_on references only earlier seq. Do NOT include build or QA tasks — those are added automatically, one build per page.
 - Adapt pages + tasks to THIS brief (a restaurant: Home/Menu/About/Contact; a SaaS: Home/Features/Pricing/Docs; a delivery app: Home/How-it-works/Restaurants/Sign-up + a database).
@@ -53,9 +56,12 @@ function normPages(arr: any): Page[] {
 function validate(plan: any, brief: string): Plan | null {
   const list = Array.isArray(plan?.tasks) ? plan.tasks : null;
   if (!list || !list.length) return null;
-  const pages = normPages(plan.pages);
+  let pages = normPages(plan.pages);
   const theme = themeFor(plan?.theme, brief);            // LLM value trusted only if in the closed set
   const archetype = archetypeFor(plan?.archetype, brief); // same: validated, else classified from the brief
+  const shape = shapeFor(plan?.shape, brief);             // same: landing detected in CODE, never LLM whim
+  // LANDING (PLAN.md M1): exactly ONE page — the conversion page. Forced here, gated in site_model.
+  if (shape === 'landing') pages = [pages[0]];
 
   // thinking tasks only (drop any build/qa the LLM emitted)
   let tasks: Task[] = list.map((t: any, i: number) => ({
@@ -101,7 +107,7 @@ function validate(plan: any, brief: string): Plan | null {
   // QA acceptance runs AFTER every page is on disk and asserts the whole site is one coherent identity
   // (each page exactly 1 nav + 1 logo; all pages share ONE logo + ONE palette + ONE nav) via site_consistent.
   const qa: Task = { seq: ++seq, title: 'QA — acceptance (1 nav · 1 logo · 1 palette, every page)', department: 'qa', verify: 'site_consistent', depends_on: pageRenders.map(b => b.seq), artifact: null };
-  return { tasks: [...tasks, compose, ...pageRenders, qa], pages, theme, archetype };
+  return { tasks: [...tasks, compose, ...pageRenders, qa], pages, theme, archetype, shape };
 }
 
 // Hard wall-clock cap on the planner's LLM call. It flows through the shared llm()/callLLM, which already
@@ -136,12 +142,12 @@ export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: b
 export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   // Both paths flow through validate(), so the fallback gets the same archetype/database/verify wiring.
   const { plan: result, usedLLM } = await buildPlan(brief);
-  const { tasks, pages, theme, archetype } = result;
+  const { tasks, pages, theme, archetype, shape } = result;
   // ONE CMS, forced in code — never selected, never rotated, never named by an LLM. Every site is
   // built on Directus (the proven adapter: real e2e proof + servedFromCms gate). The old per-brief
   // 5-CMS selector is deleted; `npm run cms:check` asserts this invariant holds.
   const cms = 'directus';
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, cms };
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, cms };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
@@ -154,6 +160,6 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   for (const t of tasks) for (const d of t.depends_on)
     if (seqToId[d]) await pool.query('insert into task_dependencies(upstream_id, downstream_id) values ($1,$2) on conflict do nothing', [seqToId[d], seqToId[t.seq]]);
   await pool.query(`update tasks set status='ready' where project_id=$1 and status='blocked' and not exists (select 1 from task_dependencies d where d.downstream_id = tasks.id)`, [projectId]);
-  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
   return projectId;
 }

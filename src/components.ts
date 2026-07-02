@@ -165,6 +165,22 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     ${s.title ? `<h2 style="text-align:center;margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
     <div class="grid grid-3 stats">${(s.items || []).slice(0, 4).map((x: any) => `<div class="stat"><div class="stat-n">${esc(x.value)}</div><div class="muted">${esc(x.label)}</div></div>`).join('')}</div>
   </div></section>`,
+  // logos — "trusted by" social-proof band: plain text marks (no external images → gate-safe)
+  logos: (s) => `<section class="section" style="padding-block:2.6rem"><div class="container">
+    ${s.title ? `<p class="muted" style="text-align:center;letter-spacing:.08em;text-transform:uppercase;font-size:.8rem;margin-bottom:1.4rem">${esc(s.title)}</p>` : ''}
+    <div style="display:flex;flex-wrap:wrap;gap:1.6rem 2.6rem;justify-content:center;align-items:center;opacity:.78">${(s.items || []).slice(0, 8).map((n: any) => `<span style="font-weight:700;font-size:1.05rem">${esc(n)}</span>`).join('')}</div>
+  </div></section>`,
+  // offer — the conversion core of a landing page: deliverable + price anchor + risk reversal + ONE action
+  offer: (s, o) => `<section class="section"><div class="container" style="max-width:760px">
+    <div class="card" style="text-align:center;padding:2.8rem 2rem">
+      ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2>
+      ${s.body ? `<p class="lead muted">${esc(s.body)}</p>` : ''}
+      ${(s.bullets && s.bullets.length) ? `<ul class="price-feats" style="display:inline-block;text-align:left;margin:1.4rem auto 0">${s.bullets.slice(0, 8).map((b: string) => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}
+      ${s.price ? `<div class="price-amt" style="margin-top:1rem">${esc(s.price)}${s.period ? `<span>/${esc(s.period)}</span>` : ''}</div>` : ''}
+      <div style="margin-top:1.4rem">${btn(o, s.cta, s.link)}</div>
+      ${s.guarantee ? `<p class="muted" style="font-size:.9rem;margin-top:1rem">${esc(s.guarantee)}</p>` : ''}
+    </div>
+  </div></section>`,
   // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
   // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.
   collection: (s, o) => {

@@ -128,7 +128,7 @@ function clampSeedPks(model: any, repairs: string[] = []): any {
 }
 
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
-const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form']);
+const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form', 'logos', 'offer']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;
 
 const str = (v: any): string => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
@@ -186,6 +186,16 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
     case 'stats':
       s.items = cleanItems(s.items, ['value', 'label']);
       if (s.items.length < 1) { repairs.push('dropped stats with no items'); return null; }
+      break;
+    case 'logos':
+      // social-proof band: plain text names (never external images — gate-safe by construction)
+      s.items = Array.isArray(s.items) ? s.items.filter(nonEmpty).map(str) : [];
+      if (s.items.length < 2) { repairs.push('dropped logos with <2 names'); return null; }
+      break;
+    case 'offer':
+      // the conversion core of a landing page: deliverable + risk reversal + one action
+      if (!nonEmpty(s.title)) { repairs.push('dropped offer with no title'); return null; }
+      s.bullets = Array.isArray(s.bullets) ? s.bullets.filter(nonEmpty).map(str) : [];
       break;
     case 'pricing':
       s.plans = cleanItems(s.plans, ['name', 'price']);

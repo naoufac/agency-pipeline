@@ -263,5 +263,41 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('normalizeSite: clean {{brand}} model has NO slop error', !normalizeSite(cleanModel, pages, {}).errors.some(e => /slop/i.test(e)));
 }
 
+
+// ---- M1 · LANDING (PLAN.md): shape classifier + conversion components ----
+{
+  const { classifyShape, shapeFor, CONVERSION_SECTIONS } = await import('./landing.ts');
+  ok('landing: "landing page for a fitness coach" → landing', classifyShape('a landing page for a fitness coach in Miami') === 'landing');
+  ok('landing: "high-converting sales page" → landing', classifyShape('high-converting sales page for my course') === 'landing');
+  ok('landing: "waitlist for our app launch" → landing', classifyShape('a waitlist page for our app launch') === 'landing');
+  ok('landing: plain brief → multi', classifyShape('a cozy neighborhood bookshop with reading events') === 'multi');
+  ok('landing: restaurant brief → multi', classifyShape('a website for an italian restaurant') === 'multi');
+  ok('landing: LLM-named "landing" honoured', shapeFor('landing', 'anything') === 'landing');
+  ok('landing: LLM garbage → classified from brief', shapeFor('brochure3000', 'a landing page for x') === 'landing');
+  ok('landing: conversion set covers offer+logos', CONVERSION_SECTIONS.has('offer') && CONVERSION_SECTIONS.has('logos'));
+}
+// logos + offer normalize: valid kept, hollow dropped
+{
+  const r = normalizeSpec({ brand: { name: 'X' }, sections: [hero(), { type: 'logos', title: 'Trusted by', items: ['Acme', 'Nordia', 'Kite'] }, { type: 'offer', title: 'The 30-day program', bullets: ['12 sessions', 'meal plan'], cta: 'Start today', guarantee: '30-day money-back' }] });
+  ok('logos+offer: valid kept', r.spec.sections.length === 3 && r.errors.length === 0);
+  const d = normalizeSpec({ brand: { name: 'X' }, sections: [hero(), { type: 'logos', items: ['one'] }, { type: 'offer', bullets: ['x'] }, { type: 'cta', headline: 'Go' }] });
+  ok('logos <2 names dropped', !d.spec.sections.some((s: any) => s.type === 'logos'));
+  ok('offer without title dropped', !d.spec.sections.some((s: any) => s.type === 'offer'));
+}
+// logos + offer render clean through the deterministic renderer
+{
+  const spec = { brand: { name: 'FitMia', tokens: { bg: '#ffffff', primary: '#0a5c36' } }, sections: [
+    { type: 'hero', headline: 'Still skipping workouts?', lead: 'Get a coach who keeps you on track', cta: 'Start today' },
+    { type: 'logos', title: 'As seen in', items: ['Miami Herald', 'FitWeekly', 'WLRN'] },
+    { type: 'offer', eyebrow: 'The offer', title: 'The 30-day kickstart', bullets: ['12 coached sessions', 'Custom meal plan'], price: '$299', period: 'one-time', cta: 'Start today', guarantee: '30-day money-back guarantee' },
+    { type: 'cta', headline: 'Ready?', cta: 'Start today' },
+  ] };
+  const h = renderPage(spec, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home' });
+  ok('landing render: logos names present', h.includes('Miami Herald') && h.includes('As seen in'));
+  ok('landing render: offer core present', h.includes('The 30-day kickstart') && h.includes('30-day money-back guarantee') && h.includes('$299'));
+  ok('landing render: no [object Object]', !h.includes('[object Object]'));
+  ok('landing render: offer CTA is a real link', /<a class="btn" href="[^"#]+">Start today<\/a>/.test(h));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

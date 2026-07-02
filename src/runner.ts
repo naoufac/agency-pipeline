@@ -106,7 +106,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
     } catch {}
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable, brand, site };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, shape: params.shape, tables, forms, primaryTable, brand, site };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {

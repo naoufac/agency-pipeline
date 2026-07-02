@@ -25,7 +25,7 @@ const WEB_DEPTS = new Set(['research', 'strategy']);
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any }; site?: any };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; shape?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any }; site?: any };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -72,6 +72,8 @@ const ROLE: Record<string, string> = {
                '- {"type":"pricing","title":"...","intro":"one line","plans":[{"name":"Pro","price":"$29","period":"mo","featured":true,"body":"one line","features":["...","..."],"cta":"Get Pro"}]}  (2-3; mark one featured)\n' +
                '- {"type":"testimonials","title":"...","items":[{"quote":"...","name":"...","role":"..."}]}  (2-6)\n' +
                '- {"type":"faq","title":"...","items":[{"q":"...","a":"..."}]}  (3-8)\n' +
+               '- {"type":"logos","title":"Trusted by","items":["Acme Co","Nordia","..."]}  (4-8 client/press names — social-proof band, plain text)\n' +
+               '- {"type":"offer","eyebrow":"kicker","title":"the offer in one line","body":"one sentence","bullets":["what they get","..."],"price":"$499","period":"one-time","cta":"label","guarantee":"a concrete risk-reversal, e.g. 30-day money-back"}  (the conversion core — price only if the brief names one)\n' +
                '- {"type":"form","title":"...","intro":"one line","cta":"Send","form":"contact"}  (a REAL stored form; put one on a contact / sign-up / get-in-touch page)\n' +
                '- {"type":"collection","title":"...","table":"items"} and {"type":"feed","form":"listing"}  (LIVE lists of real DB rows / public submissions — for app/store/directory pages; use the EXACT table names provided, pair a feed with a matching form)\n' +
                'JSON ONLY — exactly one object containing every page. Self-check: every { has a matching }, no second block, no prose/fences.',
@@ -100,6 +102,13 @@ function buildUser(ctx: Ctx, department?: string): string {
     }
     if (ctx.brand && ctx.brand.name) {
       s += `\nBUSINESS NAME — SYSTEM-OWNED: do NOT write the business name anywhere. Wherever the name would appear in copy, write the literal token {{brand}} — the system inserts the one locked name (the renderer also owns the logo, palette + nav button). You ONLY write copy + sections. Never invent or write a business name.\n`;
+    }
+    // LANDING (PLAN.md M1): one page engineered to convert — strict order, proof + offer, CTA last.
+    if (ctx.shape === 'landing') {
+      s += `\nTHIS IS A LANDING PAGE — one page engineered to CONVERT, not a brochure:
+- SECTION ORDER (strict): hero (name the visitor's PAIN in the headline, the PROMISE in the lead) → proof (logos and/or stats/testimonials) → what-they-get (features or split) → offer (concrete deliverable + risk-reversal guarantee; price ONLY if the brief names one) → objections (faq, optional) → the FINAL section MUST be cta or form.
+- REQUIRED: an "offer" section, plus at least TWO of: logos, stats, testimonials, offer, pricing, faq.
+- COPY: outcome-specific headline (numbers beat adjectives), second person ("you"), ONE consistent call-to-action label repeated in hero/offer/final, zero generic filler.\n`;
     }
     s += `\nEvery cta MAY set "link":"<page slug>". Valid slugs: ${(ctx.pages || []).map(p => p.slug).join(', ')}.\n`;
     return s;

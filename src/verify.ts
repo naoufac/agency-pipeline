@@ -3,6 +3,7 @@ import { existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as appdb from './appdb.ts';
 import { copySlop } from './spec.ts';
+import { CONVERSION_SECTIONS } from './landing.ts';
 
 export const SITES = new URL('../sites/', import.meta.url);
 
@@ -172,7 +173,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // every planned page and each page is a valid, renderable spec (hero-first, >= 2 real sections) BEFORE
     // any deterministic render runs. A bad model rejects here into retry-with-feedback — pages never render
     // from a broken CMS.
-    const r = await pool.query("select params->'site' as site, params->'pages' as pages from projects where id=$1", [task.project_id]);
+    const r = await pool.query("select params->'site' as site, params->'pages' as pages, params->>'shape' as shape from projects where id=$1", [task.project_id]);
     const site = r.rows[0]?.site; const planned = Array.isArray(r.rows[0]?.pages) ? r.rows[0].pages : [];
     const ps = (site && Array.isArray(site.pages)) ? site.pages : [];
     if (!ps.length) return { ok: false, log: 'no composed site model (params.site empty)' };
@@ -180,6 +181,16 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     for (const p of ps) {
       if (!Array.isArray(p.sections) || p.sections.length < 2) return { ok: false, log: `page "${p.slug}" has <2 sections` };
       if (p.sections[0]?.type !== 'hero') return { ok: false, log: `page "${p.slug}" must open with a hero` };
+    }
+    // LANDING gate (PLAN.md M1): exactly one page, >=2 conversion sections, final section is the CTA.
+    if (r.rows[0]?.shape === 'landing') {
+      if (ps.length !== 1) return { ok: false, log: `a landing project is EXACTLY 1 page — model has ${ps.length}` };
+      const types = ps[0].sections.map((s: any) => String(s.type));
+      const conv = types.filter((t: string) => CONVERSION_SECTIONS.has(t));
+      if (conv.length < 2) return { ok: false, log: `landing page needs >=2 conversion sections (logos/stats/testimonials/offer/pricing/faq) — found ${conv.length} in [${types.join(', ')}]. Add social proof and an offer.` };
+      const last = types[types.length - 1];
+      if (last !== 'cta' && last !== 'form') return { ok: false, log: `landing page must END with a cta or form — it ends with "${last}". Put the final call-to-action last.` };
+      return { ok: true, log: `landing model ok — 1 page · ${conv.length} conversion sections [${conv.join(', ')}] · ends with ${last}` };
     }
     return { ok: true, log: `site model ok — ${ps.length} pages composed (one CMS)` };
   }
