@@ -43,6 +43,9 @@ export interface BuildCtx {
   archetype: Archetype;
   theme: ThemeName;
   sitesDir: string;     // where /sites/<id>/ artifacts are written
+  // M2: the schema snapshot taken at compose (params.schema_forms) — REQUIRED for any render of a
+  // page that may carry a typed form; without it the form degrades to the contact fallback.
+  schemaForms?: { tables: string[]; forms: Record<string, any[]>; primaryTable: string };
 }
 
 // The contract. See docs/CMS-ARCHITECTURE.md for how it maps onto Directus.
