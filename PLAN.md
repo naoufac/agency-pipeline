@@ -91,13 +91,16 @@ them, not the same template in different colours.
 **Machine gate:** an automated check that several briefs yield structurally different layouts
 (different hero type, section order, nav) — plus a visual critique pass.
 
-## PQ2 · Ecommerce that actually sells
-**You get:** a store you can actually buy from — product detail (price, options, add-to-cart), a real
-cart (line items, quantities, total, remove), a checkout that writes a real order.
-**Phone check:** open a store → open a product → add two to cart → change a quantity → check out →
-you get a confirmation and the order is real.
-**Machine gate:** a browser adds 2 products, edits quantity, checks out; the order + line items land
-in the database; totals are correct.
+## PQ2 · Ecommerce that actually sells — CORE SHIPPED 2026-07-02, widening
+**Shipped + proven live:** shop grid from the real products table with Add-to-cart · cart page
+(quantities, remove, total) · checkout that writes a REAL order in one transaction, priced
+SERVER-side from database prices (client prices are display-only), unit prices snapshotted on line
+items · the browser reviewer BUYS on every store build (order + line items must land) · lead email
+per order. Gates: ecom:check (20) + the buy probe in every review.
+Live proof: ceramics store 0384560a — a 3-item order through the public site, total $141 computed
+server-side, line items verified in the database.
+**Phone check (yours):** open the store → add to cart → checkout → confirmation with a real order number.
+**Still ahead:** product detail pages, options/variants, stock awareness.
 
 ## PQ3 · A CMS a client can actually use
 **You get:** per-site content collections in Directus (Products, Menu, Posts, Team…) a non-technical
