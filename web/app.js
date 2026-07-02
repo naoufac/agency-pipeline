@@ -7,6 +7,38 @@ navToggle?.addEventListener('click', () => { const o = navLinks.classList.toggle
 navLinks?.addEventListener('click', e => { if (e.target.closest('a')) navLinks.classList.remove('open'); });
 let poll = null;
 const j = (u, o) => fetch(u, o).then(r => r.json());
+/* ---- M4 · auth: magic-link sign-in; the nav shows who you are ---- */
+let me = null;
+async function loadMe(){ try { me = (await j('/api/me')).email; } catch { me = null; } renderAuthNav(); }
+function renderAuthNav(){
+  let a = document.getElementById('authlink');
+  if (!a && navLinks){ a = document.createElement('a'); a.id = 'authlink'; a.href = '#/signin'; navLinks.insertBefore(a, navLinks.querySelector('.btn')); }
+  if (!a) return;
+  if (me){ a.textContent = 'Sign out (' + me.split('@')[0] + ')'; a.onclick = async e => { e.preventDefault(); await fetch('/api/auth/logout', { method:'POST' }); me = null; renderAuthNav(); location.hash = '#/'; location.reload(); }; }
+  else { a.textContent = 'Sign in'; a.onclick = null; }
+}
+function signin(){
+  app.innerHTML = `<div class="container"><section class="hero" style="text-align:center;max-width:560px;margin:0 auto">
+    <h1>Sign in</h1>
+    <p class="lead" style="margin:14px auto">Enter your email — we send a one-tap sign-in link. Your projects become yours alone.</p>
+    <div class="brief-bar" style="margin:0 auto">
+      <input id="email" class="input" type="email" placeholder="you@example.com" autocomplete="email" />
+      <button id="golink" class="btn">Email me a link →</button>
+    </div>
+    <p id="authmsg" class="muted" style="margin-top:16px"></p></section></div>`;
+  const go = async () => {
+    const email = document.getElementById('email').value.trim(); if (!email) return;
+    const btn = document.getElementById('golink'); btn.disabled = true; btn.textContent = 'Sending…';
+    const m = document.getElementById('authmsg');
+    try { const r = await j('/api/auth/request', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ email }) });
+          m.textContent = r.ok ? '✓ Check your inbox — the link signs you in with one tap (expires in 15 minutes).' : (r.error || 'Something went wrong.');
+    } catch { m.textContent = 'Something went wrong — try again.'; }
+    btn.disabled = false; btn.textContent = 'Email me a link →';
+  };
+  document.getElementById('golink').onclick = go;
+  document.getElementById('email').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  setTimeout(() => document.getElementById('email')?.focus(), 50);
+}
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 const clearPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
 const ACTIVE = ['ready','running','verifying','blocked'];
@@ -87,7 +119,7 @@ function home(){
   const bgrid = document.getElementById('bgrid'), rgrid = document.getElementById('rgrid');
   async function load(){
     let list; try { list = await j('/api/projects'); } catch { return true; }
-    document.getElementById('emptywrap').innerHTML = list.length ? '' : `<div class="empty">No sites yet. Describe one above and Relay builds it.</div>`;
+    document.getElementById('emptywrap').innerHTML = list.length ? '' : `<div class="empty">${me ? 'No sites in your account yet — describe one above and it\'s yours.' : 'No sites yet. Describe one above and Relay builds it.'}</div>`;
     let building = 0;
     for (const p of list){
       const st = projStatus(p), isB = st === 'running'; if (isB) building++;
@@ -620,6 +652,7 @@ function router(){
   const seq = new URLSearchParams(query || '').get('seq');
   let navPath = '/';
   if (!seg.length) home();
+  else if (seg[0] === 'signin') { navPath = '/signin'; signin(); }
   else if (seg[0] === 'new') { navPath = '/new'; newSite(); }
   else if (seg[0] === 'roadmap') { navPath = '/roadmap'; roadmap(); }
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
@@ -633,3 +666,4 @@ function router(){
 }
 window.addEventListener('hashchange', router);
 router();
+loadMe();

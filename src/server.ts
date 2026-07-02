@@ -12,6 +12,7 @@ import { renderLiveFromCms } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
+import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -31,7 +32,7 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   if (arr.length >= max) { map.set(ip, arr); return true; }
   arr.push(now); map.set(ip, arr); return false;
 }
-const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>();
+const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>(), AUTH_HITS = new Map<string, number[]>();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
@@ -46,12 +47,16 @@ const STATIC: Record<string, string> = {
 const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript',
   png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp' };
 
-async function boardJSON(projectId?: string) {
+async function boardJSON(user: User | null, projectId?: string) {
   const p = projectId
-    ? await pool.query('select id, brief, status, params, created_at from projects where id=$1', [projectId])
-    : await pool.query('select id, brief, status, params, created_at from projects order by created_at desc limit 1');
+    ? await pool.query('select id, brief, status, params, created_at, owner_id from projects where id=$1', [projectId])
+    : (user
+      ? await pool.query('select id, brief, status, params, created_at, owner_id from projects where owner_id=$1 order by created_at desc limit 1', [user.id])
+      : await pool.query('select id, brief, status, params, created_at, owner_id from projects where owner_id is null order by created_at desc limit 1'));
   if (!p.rows.length) return { project: null, tasks: [], edges: [] };
   const proj = p.rows[0];
+  if (!canSee(user, proj.owner_id)) return { project: null, tasks: [], edges: [] };   // owned = owner's only
+  delete proj.owner_id;
   const tasks = (await pool.query('select seq, title, department, status from tasks where project_id=$1 order by seq', [proj.id])).rows;
   const edges = (await pool.query(
     `select us.seq as "from", ds.seq as "to" from task_dependencies d
@@ -61,7 +66,7 @@ async function boardJSON(projectId?: string) {
   return { project: proj, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null };
 }
 
-async function projectsJSON() {
+async function projectsJSON(user: User | null) {
   const r = await pool.query(`
     select p.id, p.brief, p.status, p.created_at,
       count(t.*)::int as total,
@@ -74,10 +79,16 @@ async function projectsJSON() {
       (select d.passed from dogfood_reviews d where d.project_id=p.id order by d.id desc limit 1) as review_passed,
       (select coalesce(jsonb_array_length(d.issues),0) from dogfood_reviews d where d.project_id=p.id order by d.id desc limit 1) as review_issues
     from projects p left join tasks t on t.project_id=p.id
-    group by p.id order by p.created_at desc limit 50`);
+    where ${user ? 'p.owner_id = $1' : 'p.owner_id is null'}
+    group by p.id order by p.created_at desc limit 50`, user ? [user.id] : []);
   for (const row of r.rows)
     row.site = existsSync(fileURLToPath(new URL(row.id + '/index.html', SITES))) ? '/sites/' + row.id + '/' : null;
   return r.rows;
+}
+
+// M4 ownership gate: 404 (never 403 — don't leak existence) when an owned project isn't yours.
+async function ownerOf(id: string): Promise<string | null | undefined> {
+  return (await pool.query('select owner_id from projects where id=$1', [id])).rows[0]?.owner_id;
 }
 
 function send(res: http.ServerResponse, code: number, type: string, body: string | Buffer) {
@@ -91,6 +102,31 @@ const server = http.createServer(async (req, res) => {
     const path = url.pathname;
 
     if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
+
+    // M4 — who is asking? Resolved once per API request; /sites and static stay auth-free (public web).
+    const user: User | null = path.startsWith('/api/') ? await userFromCookie(pool, req.headers.cookie) : null;
+
+    // ---- AUTH: passwordless magic links on the naples.agency SMTP ----
+    if (path === '/api/auth/request' && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (limited(AUTH_HITS, 5, ip)) return send(res, 429, 'application/json', '{"error":"too many sign-in requests — try again in a few minutes"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let email = ''; try { email = (JSON.parse(raw || '{}').email || '').trim(); } catch {}
+      const r = await requestMagic(pool, email, process.env.PUBLIC_URL || 'https://board.naples.agency');
+      return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r));
+    }
+    if (path === '/api/auth/verify') {
+      const v = await verifyMagic(pool, url.searchParams.get('token') || '');
+      if (!v) return send(res, 400, 'text/html; charset=utf-8', '<meta charset="utf-8"><body style="font-family:sans-serif;background:#0A0C12;color:#E8EAF0;padding:40px">This sign-in link has expired or was already used. <a style="color:#7C7AFF" href="/">Request a new one</a>.</body>');
+      res.writeHead(302, { 'set-cookie': sessionCookie(v.session), location: '/' });
+      res.end(); return;
+    }
+    if (path === '/api/auth/logout' && req.method === 'POST') {
+      await logout(pool, req.headers.cookie);
+      res.writeHead(200, { 'set-cookie': clearCookie(), 'content-type': 'application/json' });
+      res.end('{"ok":true}'); return;
+    }
+    if (path === '/api/me') return send(res, 200, 'application/json', JSON.stringify(user ? { email: user.email } : { email: null }));
 
     // mail.naples.agency / email.naples.agency — the PUBLISHED status of Relay's email layer:
     // what it does (lead alerts on every produced-site submission; account email lands in M4),
@@ -138,10 +174,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       return send(res, 404, 'text/plain', 'site not found');
     }
-    if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(url.searchParams.get('id') || undefined)));
-    if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON()));
-    if (path === '/api/kpi') return send(res, 200, 'application/json', JSON.stringify(await computeKpi(pool, url.searchParams.get('id') || undefined)));
+    if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(user, url.searchParams.get('id') || undefined)));
+    if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON(user)));
+    if (path === '/api/kpi') {
+      const kid = url.searchParams.get('id') || undefined;
+      if (kid && !canSee(user, await ownerOf(kid))) return send(res, 404, 'application/json', 'null');
+      return send(res, 200, 'application/json', JSON.stringify(await computeKpi(pool, kid)));
+    }
     if (path === '/api/output') {
+      if (!canSee(user, await ownerOf(url.searchParams.get('id') || ''))) return send(res, 404, 'application/json', '{}');
       const r = await pool.query(
         `select t.seq, t.title, t.department, t.status, t.verify, coalesce(o.content,'') as content
          from tasks t left join task_outputs o on o.task_id=t.id and o.is_current
@@ -191,6 +232,9 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     }
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const own = await ownerOf(id);
+      // public feeds (a site's own 'feed' section) pass a form name; the owner's full Data view does not
+      if (!url.searchParams.get('form') && !canSee(user, own)) return send(res, 404, 'application/json', '{"submissions":[]}');
       if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"submissions":[],"error":"rate limited"}');
       const form = url.searchParams.get('form');   // public feeds pass a form name; the operator's Data tab omits it (all forms)
       const r = form
@@ -202,6 +246,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     // ---- Interaction QA (dogfood): a real browser used the site; latest verdict ----
     if (path === '/api/dogfood') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      if (!canSee(user, await ownerOf(id))) return send(res, 404, 'application/json', '{"summary":null,"issues":[],"checked":{}}');
       try {
         const r = await pool.query('select passed, summary, issues, checked, at from dogfood_reviews where project_id=$1 order by id desc limit 1', [id]);
         return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || { summary: null, issues: [], checked: {} }));
@@ -210,12 +255,14 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     // ---- The data model the agency designed for this project (live introspection) ----
     if (path === '/api/schema') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      if (!canSee(user, await ownerOf(id))) return send(res, 404, 'application/json', '{"schema":null,"tables":[]}');
       try { return send(res, 200, 'application/json', JSON.stringify(await appdb.describeSchema(pool, id))); }
       catch (e: any) { return send(res, 200, 'application/json', JSON.stringify({ schema: null, tables: [], error: String(e?.message ?? e).slice(0, 120) })); }
     }
     // ---- Visual QA: a vision model reads the produced pages + reports issues ----
     if (path === '/api/qa') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      if (!canSee(user, await ownerOf(id))) return send(res, 404, 'application/json', '{"overall":null,"reviews":[]}');
       const r = await pool.query('select slug, viewport, score, issues, shot from qa_reviews where project_id=$1 order by slug, viewport', [id]);
       const scores = r.rows.map((x: any) => x.score);
       const overall = scores.length ? Math.min(...scores) : null;
@@ -227,8 +274,8 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
       const ip = String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?').split(',')[0].trim();
       if (qaLimited(ip)) return send(res, 429, 'application/json', '{"error":"slow down"}');
-      const pr = (await pool.query('select status from projects where id=$1', [id])).rows[0];
-      if (!pr) return send(res, 404, 'application/json', '{"error":"project not found"}');
+      const pr = (await pool.query('select status, owner_id from projects where id=$1', [id])).rows[0];
+      if (!pr || !canSee(user, pr.owner_id)) return send(res, 404, 'application/json', '{"error":"project not found"}');
       if (pr.status !== 'done') return send(res, 409, 'application/json', '{"error":"site is still building"}');
       if (qaRunning(id)) return send(res, 200, 'application/json', '{"ok":true,"state":"running"}');   // already reviewing
       reviewSite(pool, id).catch((e) => console.error('qa run', id, e?.message));   // fire-and-forget; polled via /api/qa
@@ -244,6 +291,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
       if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
       const id = await plan(pool, brief);
+      if (user) await pool.query('update projects set owner_id=$2 where id=$1', [id, user.id]);   // your brief = your site
       // build in-process by default; with RELAY_BUILD=0 the web server only PLANS and a worker builds it
       if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('run', id, e?.message));
       return send(res, 200, 'application/json', JSON.stringify({ id }));
@@ -257,8 +305,8 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       let raw = ''; for await (const c of req) raw += c;
       let id = '', brief = ''; try { const b = JSON.parse(raw || '{}'); id = (b.id || '').trim(); brief = (b.brief || '').trim(); } catch {}
       if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, 'application/json', '{"error":"id required"}');
-      const pr = (await pool.query('select brief, status from projects where id=$1', [id])).rows[0];
-      if (!pr) return send(res, 404, 'application/json', '{"error":"project not found"}');
+      const pr = (await pool.query('select brief, status, owner_id from projects where id=$1', [id])).rows[0];
+      if (!pr || !canSee(user, pr.owner_id)) return send(res, 404, 'application/json', '{"error":"project not found"}');
       const active = (await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [id])).rows[0].n;
       if (active) return send(res, 409, 'application/json', '{"error":"this project is still building"}');
       await replan(pool, id, brief || pr.brief);
@@ -307,6 +355,7 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 // CMS restart-safety: a publish interrupted by a crash/restart is stuck at 'publishing' (snapshots have
 // no lease). Release it so the page stays editable. Runs on boot + every 2 min.
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
+ensureAuthTables(pool).catch((e) => console.error('auth tables', e?.message));
 pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
 
 // AUTONOMOUS BUILD RECOVERY (0-human): re-run any 'blocked' project that still has failed tasks AND resurrect
