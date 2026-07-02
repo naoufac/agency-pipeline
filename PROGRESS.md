@@ -243,3 +243,22 @@ Board docs/roadmap/about brought to reality (compose/CMS/QA stages, full gate li
 gained a typecheck gate after a broken string crash-looped prod once. Checks: spec 120 · migrate 17
 · cms 9 · themes 5/5. Recon: supabase CLI/dead pointers removed, relay-drupal decommissioned,
 Supabase account token kept as the documented scale-out path.
+
+## 2026-07-02 (later) — Session handoff state (for the next context window)
+Everything below is LIVE and pushed. Read PLAN.md (plan of record) + GOAL.md (definition of done) +
+AGENTS.md §0 before touching anything.
+- **Working method (owner-locked):** ALWAYS work on the SYSTEM, never on a produced website. A site
+  is a reflection of the system. Success = a zero-touch fresh brief comes out agency-grade, judged by
+  the system's own reviewer. Rolling loop: ask "would a productive agency ship this?" (3-lens panel
+  on real screenshots) → build the #1 finding into the generator → gate it → prove on a hands-off build.
+- **Proven zero-touch:** hot-sauce store a47260fb — system built it, system's reviewer failed it
+  (footer overflow on mobile, mis-targeted buy-probe), generator fixed both, system re-produced it
+  clean: review PASSED 0 high, 6/6 products photographed by rowmedia, buy-probe placed a real order.
+- **Reliability spine:** `npm run check` = 9 gate suites (spec 128 · cms · layout 24 · ecom 26 ·
+  content 19 · leak · migrate 17 · theme 5 AA · build); relay-deploy.sh runs the FULL suite inside
+  prod before restart. auth:check (21) + alert:check (9) run on demand against the live server.
+- **Next agency-panel picks (ranked, not started):** product detail pages (PDP) for stores · hero
+  art-direction/overlay consistency + brand-tinted grading · 8px spacing + CTA hover/focus states +
+  designed empty-states · CTA-monotone style note already surfaces on the board.
+- **Owner comms:** Telegram bridge; phone-readable replies; send screenshots as photos; every
+  milestone gets a 30s phone check + machine gate; never mark done beyond what's proven.
