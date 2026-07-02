@@ -241,7 +241,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         }
         return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
       }
-      catch (e: any) { return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: String(e?.message ?? e).slice(0, 120) })); }
+      catch (e: any) { console.error('site data insert', dataM[1], dataM[2], e?.message ?? e); return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'could not save — please check the form and try again' })); }
     }
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
@@ -270,7 +270,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
       if (!canSee(user, await ownerOf(id))) return send(res, 404, 'application/json', '{"schema":null,"tables":[]}');
       try { return send(res, 200, 'application/json', JSON.stringify(await appdb.describeSchema(pool, id))); }
-      catch (e: any) { return send(res, 200, 'application/json', JSON.stringify({ schema: null, tables: [], error: String(e?.message ?? e).slice(0, 120) })); }
+      catch (e: any) { console.error('schema introspection', id, e?.message ?? e); return send(res, 200, 'application/json', JSON.stringify({ schema: null, tables: [] })); }
     }
     // ---- Visual QA: a vision model reads the produced pages + reports issues ----
     if (path === '/api/qa') {
@@ -351,9 +351,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     }
     send(res, 404, 'text/plain', 'not found');
   } catch (e: any) {
-    send(res, 500, 'text/plain', 'err: ' + (e?.message ?? e));
+    // THE SOURCE of the "raw Postgres error leaked to the client" class: this catch-all used to echo
+    // e.message straight back, so ANY unhandled throw (a bad cast, a constraint, a query typo) dumped
+    // internals to whoever hit the URL. Now the real error is logged SERVER-SIDE with a short ref;
+    // the client gets an opaque message + that ref. No handler — present or future — can leak again.
+    const ref = Math.abs(hashStr(String(e?.stack ?? e?.message ?? e) + req.url)).toString(36).slice(0, 6);
+    console.error(`[500 ref=${ref}] ${req.method} ${req.url} —`, e?.stack ?? e?.message ?? e);
+    if (!res.headersSent) send(res, 500, 'application/json', JSON.stringify({ error: 'Something went wrong on our end.', ref }));
   }
 });
+
+// tiny, dependency-free string hash for an error correlation ref (log ↔ client, no internals shared)
+function hashStr(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) { h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; } return h; }
 server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PORT));
 
 // restart-safe: on boot, resume any project that still has unfinished tasks
