@@ -1,6 +1,10 @@
-# Relay — The One Goal (relocked 2026-07-02)
+# Relay — The One Goal (relocked 2026-07-02 · owner-confirmed same day)
 
-**A brief goes in; a real, verified, CMS-served website comes out. Zero humans in between.**
+**A brief goes in; a real, verified, CMS-served product comes out — from a high-converting
+landing page to a full-stack app with a database and user accounts. Zero humans in between.**
+
+The staged path to this goal is **[`PLAN.md`](PLAN.md)** — the plan of record, in owner language,
+one milestone at a time, each with a 30-second phone check and a deterministic machine gate.
 
 ## ONE pipeline, ONE CMS
 Every website Relay generates flows through the SAME pipeline — plan → compose (one site model)

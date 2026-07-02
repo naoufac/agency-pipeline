@@ -1,0 +1,86 @@
+# THE PLAN — from here to the automated agency (locked 2026-07-02)
+
+**The vision (unchanged, locked):** Relay is an agency that runs itself. A brief goes in; a real,
+verified product comes out — from a high-converting landing page to a full-stack app with a
+database and user accounts. Zero humans between brief and live. One pipeline, one CMS.
+
+This file is the plan of record. It is written for the **owner**, not for engineers.
+Every milestone has three parts:
+- **You get** — what exists when it's done, in plain words.
+- **Phone check** — a 30-second test the owner runs from a phone. If it fails, it's not done.
+- **Machine gate** — the deterministic check the system enforces. No agent's word, ever.
+
+Milestones ship **in order**. A milestone is not started until the previous one's gate is green.
+No side quests, no parallel systems, no "while we're at it."
+
+---
+
+## M1 · Landing pages that sell
+**You get:** a brief like "landing page for a fitness coach" produces ONE focused sales page —
+pain → promise → proof → offer → one big call-to-action. No filler pages, no brochure sprawl.
+New proof/offer/urgency components join the vetted library; the copywriter role gets
+conversion patterns.
+**Phone check:** submit a landing brief on the board → open the finished site → it reads top to
+bottom as one coherent pitch ending in a working sign-up/contact action. Count the pages: exactly 1.
+**Machine gate:** the planner detects landing intent (closed-set, like archetypes — never LLM
+whim) and emits exactly 1 page; the page carries ≥2 conversion sections; every existing gate
+(render, consistency, served-from-CMS, interaction QA) passes.
+
+## M2 · Forms that match the database
+**You get:** an app/store brief generates forms derived from its data model — right fields, right
+validation, dropdowns showing real related records (a product's category is a real category).
+What visitors submit appears instantly in the live list and in the CMS.
+**Phone check:** submit "restaurant reservation app" → open the site → the form has Name / Date /
+Party size (matching the app's actual database) → submit on your phone → your row appears in the
+list on the page.
+**Machine gate:** form fields are compiled from the schema (never hand-emitted by the LLM);
+interaction QA submits a real row and asserts it lands in the typed table AND renders in the
+collection.
+
+## M3 · Rebuild without losing data
+**You get:** re-running a brief with changes updates the app safely. New fields appear; existing
+rows survive. Iterating stops being scary.
+**Phone check:** take a finished app with test data → re-run the brief adding "also collect phone
+number" → after rebuild the form has the new field and the old submissions are still there.
+**Machine gate:** rebuilds run generated migrations (ALTER, add-with-default — never DROP of
+populated tables); an automated test writes a row, rebuilds with a changed model, and asserts the
+row survives.
+
+## M4 · Sign in and own your sites
+**You get:** a Sign-in button on the board. You (and later clients) enter an email, get a magic
+link, and see only your own projects. Every site has an owner.
+**Phone check:** sign in on your phone with your email → the link arrives in your inbox → you see
+only your projects; a second test account sees none of them.
+**Machine gate:** every API query is scoped by the signed-in owner; an automated two-user test
+proves user B cannot list or open user A's projects; magic-link email sends via the existing
+naples.agency SMTP.
+
+## M5 · The agency talks back
+**You get:** when a visitor submits a form on a produced site, the site's owner gets an instant
+email with the lead. When a build gets permanently stuck, YOU get a Telegram alert (today it just
+sits silently on the dashboard). Nobody has to go looking.
+**Phone check:** submit a form on any produced site → the owner email arrives within a minute.
+**Machine gate:** a sent-mail record is written and verified per notification; the stuck-project
+alert fires on the `project_stuck` event (dead-letter test proves it).
+
+## M6 · The agency sells itself
+**You get:** a pricing page — e.g. Landing $199 / Site $399 / App $999 — with Stripe checkout.
+A stranger pays, gets an account, submits their brief, and watches their product build. Money in,
+product out, zero humans.
+**Phone check:** open the board logged out → Pricing → pay with a test card on your phone → you're
+signed in with a live building project.
+**Machine gate:** the Stripe webhook (idempotent) creates the account + entitlement; unpaid
+accounts cannot build; an automated test-mode purchase runs end-to-end on every deploy.
+
+---
+
+## Standing rules (locked — same as GOAL.md)
+1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
+2. **Work only on Relay, never on a produced site.** Fix the generator, rebuild the output.
+3. **Delete before you add.** Dead weight is removed, not built around.
+4. **Done = the phone check passes AND the machine gate is green.** Never a report, never a promise.
+5. **No milestone starts before the previous gate is green.** No parallel half-built systems.
+
+## What is explicitly NOT in this plan (deferred until a milestone needs it)
+Multi-operator teams · analytics dashboards · custom client domains · object storage / scale-out
+(steps recorded in `docs/STACK-REVIEW.md`) · any new CMS, framework, or service.

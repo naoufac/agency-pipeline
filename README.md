@@ -2,6 +2,10 @@
 
 Relay is an autonomous **agency pipeline**: you hand it a one-line brief, an LLM planner explodes it into a dependency DAG of tasks, AI "department agents" (research → branding → content → build → QA) run them stage-by-stage — parallel where independent, sequential where one feeds the next — every output passes a **deterministic verify gate** before it counts as done, and the result is a real, shippable, multi-page website served live at `/sites/<id>/`. The website *is* the product: submit a brief on the board and watch the agency build it in front of you.
 
+> **The plan of record is [`PLAN.md`](PLAN.md)** — six milestones from here to the fully
+> automated agency, each with an owner phone-check and a deterministic machine gate.
+> The locked goal is [`GOAL.md`](GOAL.md): one pipeline, ONE CMS (Directus), zero humans.
+
 ## Locked principles (non-negotiable)
 
 These are the invariants. Change anything else, but not these.
