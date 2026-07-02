@@ -262,3 +262,23 @@ AGENTS.md §0 before touching anything.
   designed empty-states · CTA-monotone style note already surfaces on the board.
 - **Owner comms:** Telegram bridge; phone-readable replies; send screenshots as photos; every
   milestone gets a 30s phone check + machine gate; never mark done beyond what's proven.
+
+## 2026-07-02 (evening) — PDP shipped + proven zero-touch (agency-panel pick #1)
+Commits a0598f3 · a0532ea · 9993a9b · dcc232b, all deployed (prod HEAD dcc232b, gates green in prod).
+- **PDP**: product-<id>.html rendered LIVE per request from the real product row (appdb.readRow — same
+  FK/secret/photo decoration as cards) through renderPage with a system-only 'product' section (NOT in
+  spec KNOWN — the LLM can never author it). Shop cards (products table only) link image+title to it.
+  Existing stores got PDPs instantly, no rebuild (pure projection). Unknown id → honest 404.
+- **Gates**: ecom:check 26→45 (render + full live page from a real scratch schema + site_model store
+  rules); dogfood buys FROM the PDP, load-tests every card's detail link, flags no-product-detail
+  (CONTENT_FIXABLE → one recompose round).
+- **Adversarial review before deploy** (3 lenses, 14 agents): 4 confirmed findings fixed (probe crash
+  → false store-broken; PDP error scope/404; no-product-detail repair; PDP link load-tests), 7 refuted.
+- **Zero-touch proof caught a real class**: coffee-roaster brief eb1d46b5 — the 6-page cap EVICTED
+  checkout (cart's Proceed 404'd, buy-probe silently skipped, "clean" verdict on a store that cannot
+  sell). Fixed the class: planner trims brochure pages before injecting cart/checkout (exact 'checkout'
+  slug — the cart runtime targets checkout.html literally); site_model REQUIRES both pages on stores;
+  checkout-less store = loud store-broken. Rebuild proof: reviewer PASSED 0 high, order #3 $78 placed
+  via PDP → cart → checkout (run_events), 3 PDPs live with real photos/prices, ← Shop crumb.
+- Polish from own phone check: zero-valued numeric meta hidden ("Weight Grams: 0" was spec noise).
+- Owner phone check sent: mobile PDP + shop screenshots via Telegram.

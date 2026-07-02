@@ -100,7 +100,15 @@ per order. Gates: ecom:check (20) + the buy probe in every review.
 Live proof: ceramics store 0384560a — a 3-item order through the public site, total $141 computed
 server-side, line items verified in the database.
 **Phone check (yours):** open the store → add to cart → checkout → confirmation with a real order number.
-**Still ahead:** product detail pages, options/variants, stock awareness.
+**PDP shipped + proven 2026-07-02:** every product gets its own live page (product-<id>.html — photo,
+price, full description, resolved relations, add-to-cart), rendered fresh from the DB on every view
+(a Content-tab price edit shows on the next load; unknown id → honest 404). Shop cards click through.
+The reviewer BUYS through the PDP and load-tests every card's detail link; ecom:check 26→45.
+Proven zero-touch on a fresh coffee-roaster brief (eb1d46b5): reviewer PASSED 0 high, $78 order
+placed via PDP → cart → checkout. The proof also caught + fixed a seller-killing class: the page cap
+evicted checkout (store couldn't sell, probe silently skipped) — planner now trims brochure pages
+first, site_model requires cart + checkout on every store, a checkout-less store is a loud verdict.
+**Still ahead:** options/variants, stock awareness.
 
 ## PQ · Agency-panel fixes (rolling — driven by "would a productive agency ship this?")
 A 3-lens agency panel (creative director · ecom lead · account director) judges Relay's real output;
@@ -110,8 +118,9 @@ the #1 finding gets built + gated. Shipped 2026-07-02:
   white. Now each content row gets a real, cached, on-topic photo at build (rowmedia.ts; deterministic,
   retried against burst rate-limits). Proven: ceramics store, 6/6 products photographed.
 - **Grey hero void killed**: a failed hero photo is now an intentional dark branded panel, never grey.
-Gates: ecom:check + spec:check extended. Next panel picks: hero art-direction/overlay consistency,
-product detail pages, global spacing/interaction/empty-state polish.
+Gates: ecom:check + spec:check extended.
+- **Product detail pages (2026-07-02)**: shipped + proven zero-touch — see PQ2.
+Next panel picks: hero art-direction/overlay consistency, global spacing/interaction/empty-state polish.
 
 ## PQ3 · A CMS a client can actually use — CORE SHIPPED 2026-07-02, widening
 **Shipped + proven live:** every site has a Content tab — the owner sees their REAL collections
